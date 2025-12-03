@@ -35,11 +35,14 @@ app = Flask(__name__)
 LOG_BUFFER = deque(maxlen=500)
 
 class LogPollFilter(logging.Filter):
-    """Filter out /api/logs polling requests to avoid log pollution"""
+    """Filter out polling and health check requests to avoid log pollution"""
     def filter(self, record):
         message = record.getMessage()
-        # Exclude /api/logs GET requests from logs
+        # Exclude polling requests and health checks from logs
         if 'GET /api/logs' in message or 'GET /api/favorites' in message:
+            return False
+        # Filter health check requests (every 30s from Docker)
+        if 'GET / HTTP' in message and '127.0.0.1' in message:
             return False
         return True
 
