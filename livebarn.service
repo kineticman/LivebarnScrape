@@ -1,0 +1,38 @@
+# LiveBarn Manager - Systemd Service (Optional - for non-Docker deployment)
+# File: /etc/systemd/system/livebarn.service
+
+[Unit]
+Description=LiveBarn Favorites Manager
+After=network.target
+
+[Service]
+Type=simple
+User=livebarn
+Group=livebarn
+WorkingDirectory=/opt/livebarn
+Environment="LIVEBARN_EMAIL=your-email@example.com"
+Environment="LIVEBARN_PASSWORD=your-password"
+Environment="SERVER_PORT=5000"
+Environment="DB_PATH=/opt/livebarn/data/livebarn.db"
+Environment="LOG_LEVEL=INFO"
+ExecStart=/usr/bin/python3 /opt/livebarn/livebarn_manager.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+# Installation Instructions:
+# 1. Create user: sudo useradd -r -s /bin/false livebarn
+# 2. Create directory: sudo mkdir -p /opt/livebarn/data
+# 3. Copy files to /opt/livebarn/
+# 4. Install dependencies: pip3 install -r requirements.txt
+# 5. Install Playwright: playwright install chromium
+# 6. Install Streamlink: sudo apt install streamlink
+# 7. Update credentials in this file
+# 8. Copy this file to /etc/systemd/system/livebarn.service
+# 9. Enable: sudo systemctl enable livebarn
+# 10. Start: sudo systemctl start livebarn
+# 11. View logs: sudo journalctl -u livebarn -f
+#
+# Note: Docker deployment is recommended over systemd

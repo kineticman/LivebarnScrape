@@ -1,0 +1,33 @@
+# --- Python caches ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+
+# --- Local config / secrets ---
+.env
+
+# --- Local data / runtime files ---
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Logs / temp ---
+*.log
+logs/
+*.tmp
+*.bak
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
