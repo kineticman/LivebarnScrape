@@ -34,7 +34,11 @@ RUN playwright install --with-deps chromium
 COPY livebarn_manager.py .
 COPY build_catalog.py .
 COPY refresh_single.py .
+COPY schedule_utils.py .
 COPY entrypoint.sh .
+
+# Copy schedule providers module
+COPY schedule_providers/ /app/schedule_providers/
 
 # Make entrypoint executable
 RUN chmod +x entrypoint.sh

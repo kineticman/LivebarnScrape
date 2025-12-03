@@ -106,15 +106,27 @@ docker run -d \
 
 ## Initial Setup
 
-1. **Access Web Interface:**
+**No manual setup required!** The container automatically builds the venue catalog on first startup.
+
+1. **Deploy the container** using one of the installation methods above
+
+2. **First startup** (takes 1-2 minutes):
+   ```
+   🔨 Building venue catalog (first-time setup)...
+      This may take 1-2 minutes...
+   
+   ✅ Catalog build complete!
+   ```
+
+3. **Access Web Interface:**
    - Open `http://YOUR_SERVER_IP:5000` in your browser
 
-2. **Add Favorites:**
+4. **Add Favorites:**
    - Browse available venues
    - Click "Add to Favorites" on rinks you want to monitor
    - Favorites automatically appear in your M3U playlist
 
-3. **Refresh Streams:**
+5. **Refresh Streams:**
    - Click "Refresh All Streams" to capture current stream URLs
    - This happens automatically but can be triggered manually
 
@@ -145,7 +157,7 @@ Your LiveBarn streams will now appear as channels in Channels DVR with full EPG 
 
 ### Supported Rinks
 
-The system automatically fetches schedules from:
+The system uses a **modular provider architecture** to automatically fetch schedules from multiple sources:
 
 #### OhioHealth Chiller Locations
 - Chiller Dublin (Rinks 1 & 2)
@@ -164,20 +176,58 @@ The system automatically fetches schedules from:
 - **Gap Filling**: Fills unscheduled time with "Open Ice" placeholders
 - **Auto-Refresh**: Schedules update daily at 3:00 AM
 - **Time Range**: Covers today and next 2 days
+- **Modular System**: Easy to add new rinks without modifying core code
 
 ### Adding More Rinks
 
-To add schedule support for additional rinks:
+The system uses a **modular provider architecture** that makes adding new rinks simple:
 
-1. **Identify the schedule source** (API, embedded JSON, etc.)
-2. **Add mapping** in `livebarn_manager.py`:
-   ```python
-   NEW_RINK_SURFACE_ID = 12345
+1. **Copy the provider template:**
+   ```bash
+   cp schedule_providers/example_provider.py schedule_providers/your_rink_provider.py
    ```
-3. **Create fetch function** following the pattern of `fetch_lgria_schedule()`
-4. **Update `refresh_chiller_schedule()`** to include the new source
 
-See `livebarn_manager.py` for examples.
+2. **Implement 3 methods:**
+   - `name` - Display name for your rink
+   - `surface_mappings` - Map rink IDs to LiveBarn surface IDs
+   - `fetch_schedule()` - Fetch and parse schedule data
+
+3. **Register your provider:**
+   Add it to `ALL_PROVIDERS` in `schedule_providers/__init__.py`
+
+4. **Restart the container:**
+   ```bash
+   docker-compose restart
+   ```
+
+**That's it!** No changes to core code needed.
+
+📖 **Detailed guide:** See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for step-by-step instructions and examples.
+
+### Example: Adding a New Rink
+
+```python
+# schedule_providers/icepalace_provider.py
+from .base_provider import ScheduleProvider, ScheduleEvent
+
+class IcePalaceProvider(ScheduleProvider):
+    SCHEDULE_URL = "https://icepalace.com/api/schedule"
+    SURFACE_MAPPINGS = {"main": 9999}  # LiveBarn surface ID
+    
+    @property
+    def name(self) -> str:
+        return "Ice Palace Arena"
+    
+    @property
+    def surface_mappings(self):
+        return self.SURFACE_MAPPINGS
+    
+    def fetch_schedule(self, start_date, end_date):
+        # Your implementation here
+        pass
+```
+
+See existing providers in `schedule_providers/` for complete examples.
 
 ## Configuration
 
@@ -228,6 +278,19 @@ docker logs livebarn-manager
 - Missing credentials in environment variables
 - Port 5000 already in use
 - Database permissions issues
+- First startup taking longer than expected (catalog building)
+
+### No Venues Showing
+
+The container automatically builds the venue catalog on first startup. If the catalog is empty:
+
+1. **Check startup logs** for catalog build success
+2. **Manually rebuild catalog:**
+   ```bash
+   docker exec livebarn-manager python build_catalog.py
+   ```
+3. **Verify credentials** are correct
+4. **Check network connectivity** to LiveBarn
 
 ### No Streams Available
 
@@ -242,6 +305,21 @@ docker logs livebarn-manager
 2. **Check schedule cache**: Look for "Schedule refreshed" in logs
 3. **Wait for refresh**: Initial fetch happens at 3:00 AM or on container start
 4. **Force refresh**: Restart the container to trigger immediate fetch
+5. **Check provider logs**: Each provider logs its fetch status separately
+
+### Schedule Provider Issues
+
+**Provider not fetching:**
+```bash
+# Check logs for provider-specific errors
+docker logs livebarn-manager | grep "OhioHealth Chiller"
+docker logs livebarn-manager | grep "Lou & Gib Reese"
+```
+
+**Add a new provider:**
+- See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for complete guide
+- Providers are in `schedule_providers/` directory
+- No core code changes needed
 
 ### Streams Buffer or Disconnect
 
@@ -249,30 +327,28 @@ docker logs livebarn-manager
 - Token expiration is handled automatically (re-authentication)
 - Check your network connection to LiveBarn
 
-### LGRIA Schedule Not Showing
-
-1. **Verify surface is favorited**: LGRIA surface ID must be in favorites
-2. **Check logs** for "LGRIA schedule added (X events)"
-3. **Verify date range**: Only shows events for today + next 2 days
-4. **Manual test**: Run debug script:
-   ```bash
-   docker exec -it livebarn-manager python /app/debug_lgria.py
-   ```
-
 ## Development
 
 ### Project Structure
 
 ```
 LivebarnScrape/
-├── livebarn_manager.py      # Main Flask application
-├── generate_xmltv.py         # XMLTV EPG generator
-├── scrape_lgria_schedule.py  # LGRIA schedule scraper
-├── refresh_single.py         # Single stream refresh utility
-├── Dockerfile                # Container image definition
-├── docker-compose.yml        # Docker Compose configuration
-├── requirements.txt          # Python dependencies
-└── README.md                 # This file
+├── livebarn_manager.py           # Main Flask application
+├── schedule_utils.py             # Schedule utility functions
+├── schedule_providers/           # Modular schedule providers
+│   ├── __init__.py              # Provider registry
+│   ├── base_provider.py         # Abstract base class
+│   ├── chiller_provider.py      # OhioHealth Chiller
+│   ├── lgria_provider.py        # Lou & Gib Reese
+│   └── example_provider.py      # Template for new providers
+├── build_catalog.py              # Venue catalog builder
+├── refresh_single.py             # Single stream refresh utility
+├── Dockerfile                    # Container image definition
+├── docker-compose.yml            # Docker Compose configuration
+├── entrypoint.sh                 # Container startup script
+├── requirements.txt              # Python dependencies
+├── README.md                     # This file
+└── ADDING_PROVIDERS.md           # Guide for adding new rinks
 ```
 
 ### Local Development
@@ -289,14 +365,24 @@ LivebarnScrape/
    export DB_PATH=./livebarn.db
    ```
 
-3. **Run the application:**
+3. **Build initial venue catalog:**
+   ```bash
+   python build_catalog.py
+   ```
+
+4. **Run the application:**
    ```bash
    python livebarn_manager.py
    ```
 
-4. **Generate initial database:**
+5. **Test a schedule provider:**
    ```bash
-   python setup_initial_db.py
+   python -c "
+   from schedule_providers import lgria_provider
+   from datetime import datetime, timedelta
+   events = lgria_provider.fetch_schedule(datetime.now(), datetime.now() + timedelta(days=2))
+   print(f'Found {len(events)} events')
+   "
    ```
 
 ### Building Docker Image
@@ -307,14 +393,34 @@ docker build -t livebarn-manager .
 
 ## Contributing
 
-Contributions are welcome! Areas for improvement:
+Contributions are welcome! The modular architecture makes it easy to contribute:
 
-- [ ] Support for additional rink schedule sources
+### Easy Contributions:
+- ✅ **Add schedule providers** for new rinks (see [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md))
+- ✅ **Improve existing providers** with better parsing or error handling
+- ✅ **Add tests** for providers or core functionality
+
+### Areas for Improvement:
 - [ ] Advanced filtering/search in web UI
 - [ ] Recording/DVR functionality
-- [ ] Multi-user support
-- [ ] Mobile app
+- [ ] Multi-user support with authentication
+- [ ] Mobile app or responsive design improvements
 - [ ] Notifications for favorite teams/games
+- [ ] Provider health monitoring dashboard
+- [ ] Configuration UI for managing providers
+- [ ] Support for more streaming protocols
+
+### Adding a Schedule Provider
+
+The easiest way to contribute is by adding support for your local rink:
+
+1. Fork the repository
+2. Create a new provider in `schedule_providers/`
+3. Follow the template in `example_provider.py`
+4. Test it locally
+5. Submit a pull request
+
+See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for detailed instructions.
 
 Please open an issue or pull request on GitHub.
 

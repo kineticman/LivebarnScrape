@@ -21,6 +21,10 @@ import socket
 from apscheduler.schedulers.background import BackgroundScheduler
 import xml.etree.ElementTree as ET 
 
+# Import modular schedule providers
+from schedule_providers import ALL_PROVIDERS
+from schedule_utils import group_events_by_surface, fill_gaps_with_open_ice 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -98,32 +102,8 @@ DB_PATH = Path(os.getenv('DB_PATH', '/data/livebarn.db'))
 # Keep this fairly short so UI errors out quickly instead of appearing frozen on locks
 SQLITE_TIMEOUT = 3
 
-# --- Chiller Schedule Integration ---
-CHILLER_API_BASE = "https://thechiller.com/admin/scheduler/init-scheduler-live.cfm"
-
-# Map Chiller product IDs to LiveBarn surface IDs
-CHILLER_TO_LIVEBARN = {
-    "1": 864,   # Dublin 1
-    "2": 865,   # Dublin 2
-    "5": 867,   # Easton 1
-    "6": 866,   # Easton 2
-    "8": 868,   # North 1
-    "9": 869,   # North 2
-    "13": 872,  # Ice Haus
-    "14": 871,  # Ice Works
-    "16": 873,  # Springfield
-    "24": 870,  # North 3
-}
-
-# Ice sheet product IDs (skip rooms/gyms)
-ICE_SHEET_PRODUCT_IDS = {"1", "2", "5", "6", "8", "9", "13", "14", "16", "24"}
-
-# --- LGRIA Schedule Integration ---
-LGRIA_SCHEDULE_URL = "https://lgria.finnlyconnect.com/schedule/201"
-LGRIA_SURFACE_ID = 2445  # Lou & Gib Reese Ice Arena - Newark
-
-# Global cache for Chiller schedule data
-CHILLER_SCHEDULE_CACHE = {
+# Global cache for schedule data (all providers)
+SCHEDULE_CACHE = {
     'events_by_surface': {},
     'last_updated': None
 }
@@ -141,249 +121,51 @@ def get_lan_ip():
         s.close()
     return ip
 
-# --- Chiller Schedule Functions ---
 
-def fetch_chiller_schedule(start_date: datetime, end_date: datetime) -> List[Dict[str, str]]:
+def refresh_schedule():
     """
-    Fetch schedule data from Chiller API
-    Returns list of event dicts with keys: id, start_date, end_date, text, productid, etc.
+    Background job to refresh schedule data from all providers
+    Uses modular provider system - automatically fetches from all enabled providers
     """
-    try:
-        params = {
-            "timeshift": "300",  # Eastern (UTC-5)
-            "uid": "1",
-            "from": start_date.strftime("%Y-%m-%d"),
-            "to": end_date.strftime("%Y-%m-%d"),
-        }
-        
-        logger.info(f"🔍 Fetching Chiller schedule: {start_date.date()} to {end_date.date()}")
-        
-        resp = requests.get(CHILLER_API_BASE, params=params, timeout=15)
-        resp.raise_for_status()
-        
-        root = ET.fromstring(resp.text)
-        events: List[Dict[str, str]] = []
-        
-        for ev in root.findall("event"):
-            record: Dict[str, str] = {"id": ev.get("id", "")}
-            for child in ev:
-                record[child.tag] = (child.text or "").strip()
-            
-            # Only include ice sheet events
-            if record.get("productid") in ICE_SHEET_PRODUCT_IDS:
-                events.append(record)
-        
-        logger.info(f"✅ Found {len(events)} ice sheet events")
-        return events
-        
-    except Exception as e:
-        logger.error(f"⚠️  Failed to fetch Chiller schedule: {e}")
-        return []
-
-
-def parse_chiller_datetime(dt_str: str) -> Optional[datetime]:
-    """Parse Chiller datetime string: '2025-12-02 09:30:00.0'"""
-    try:
-        return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S.%f")
-    except (ValueError, AttributeError):
-        return None
-
-
-def extract_js_list_variable(html: str, var_name: str) -> str:
-    """
-    Find a JS variable assignment like:
-        var_name = [ {...}, {...}, ... ];
-    and return the raw text of the [...] part (as a string that is valid JSON).
-    """
-    marker = var_name + " ="
-    idx = html.find(marker)
-    if idx == -1:
-        raise RuntimeError(f"Could not find variable {var_name!r} in HTML")
-
-    # Find first '[' after the assignment
-    start = html.find("[", idx)
-    if start == -1:
-        raise RuntimeError(f"No '[' found after {var_name!r} assignment")
-
-    depth = 0
-    end = None
-    for i, ch in enumerate(html[start:], start=start):
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                end = i
-                break
-
-    if end is None:
-        raise RuntimeError(f"Could not find matching ']' for {var_name!r}")
-
-    return html[start : end + 1]
-
-
-def parse_lgria_datetime(dt_str: str) -> Optional[datetime]:
-    """
-    Parse LGRIA datetime string: '2025-11-26T12:00:00' (ISO 8601 format)
-    These datetimes are already in EST (UTC-5).
-    """
-    try:
-        return datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
-    except (ValueError, AttributeError):
-        return None
-
-
-def fetch_lgria_schedule() -> List[Dict]:
-    """
-    Fetch schedule data from LGRIA website
-    Returns list of event dicts with keys: StartTime, EndTime, EventName, etc.
-    Events are in EST timezone.
-    """
-    try:
-        logger.info(f"🔍 Fetching LGRIA schedule...")
-        
-        resp = requests.get(LGRIA_SCHEDULE_URL, timeout=15)
-        resp.raise_for_status()
-        html = resp.text
-        
-        # Extract the JavaScript array
-        raw_list = extract_js_list_variable(html, "_onlineScheduleList")
-        events = json.loads(raw_list)
-        
-        logger.info(f"✅ Found {len(events)} LGRIA events")
-        return events
-        
-    except Exception as e:
-        logger.error(f"⚠️  Failed to fetch LGRIA schedule: {e}")
-        return []
-
-
-def process_lgria_events(lgria_events: List[Dict], start_date: datetime, end_date: datetime) -> List[Dict[str, str]]:
-    """
-    Convert LGRIA events to standardized format compatible with Chiller format.
-    Filter to only include events within the date range.
-    Returns list of dicts with 'start_date', 'end_date', 'text' keys.
-    """
-    processed = []
-    
-    for event in lgria_events:
-        # Use correct field names: EventStartTime, EventEndTime
-        start_time = parse_lgria_datetime(event.get("EventStartTime", ""))
-        end_time = parse_lgria_datetime(event.get("EventEndTime", ""))
-        
-        if not start_time or not end_time:
-            continue
-        
-        # Filter to date range
-        if start_time < start_date or start_time >= end_date:
-            continue
-        
-        # Use Description as the event name, fallback to AccountName
-        event_name = event.get("Description", "") or event.get("AccountName", "Ice Time")
-        
-        # Convert to Chiller-compatible format
-        processed.append({
-            "start_date": start_time.strftime("%Y-%m-%d %H:%M:%S.0"),
-            "end_date": end_time.strftime("%Y-%m-%d %H:%M:%S.0"),
-            "text": event_name.strip()
-        })
-    
-    # Sort by start time
-    processed.sort(key=lambda e: e["start_date"])
-    return processed
-
-
-def group_events_by_surface(events: List[Dict[str, str]]) -> Dict[int, List[Dict[str, str]]]:
-    """Group Chiller events by LiveBarn surface_id"""
-    grouped: Dict[int, List[Dict[str, str]]] = {}
-    
-    for event in events:
-        product_id = event.get("productid", "")
-        surface_id = CHILLER_TO_LIVEBARN.get(product_id)
-        
-        if surface_id:
-            if surface_id not in grouped:
-                grouped[surface_id] = []
-            grouped[surface_id].append(event)
-    
-    # Sort events by start time for each surface
-    for surface_id in grouped:
-        grouped[surface_id].sort(key=lambda e: e.get("start_date", ""))
-    
-    return grouped
-
-
-def fill_gaps_with_open_ice(events: List[Dict[str, str]], start: datetime, end: datetime) -> List[Tuple[datetime, datetime, str]]:
-    """
-    Take sorted events and fill gaps with 'Open Ice' programs
-    Returns list of (start_time, end_time, title) tuples
-    """
-    programs: List[Tuple[datetime, datetime, str]] = []
-    current_time = start
-    
-    for event in events:
-        event_start = parse_chiller_datetime(event.get("start_date", ""))
-        event_end = parse_chiller_datetime(event.get("end_date", ""))
-        
-        if not event_start or not event_end:
-            continue
-        
-        # Fill gap before this event with "Open Ice" in 1-hour blocks
-        while current_time < event_start:
-            gap_end = min(current_time + timedelta(hours=1), event_start)
-            programs.append((current_time, gap_end, "Open Ice"))
-            current_time = gap_end
-        
-        # Add the actual event
-        event_title = event.get("text", "Ice Time").strip()
-        if event_title:
-            programs.append((event_start, event_end, event_title))
-        else:
-            programs.append((event_start, event_end, "Ice Time"))
-        
-        current_time = event_end
-    
-    # Fill remaining time until end with "Open Ice"
-    while current_time < end:
-        gap_end = min(current_time + timedelta(hours=1), end)
-        programs.append((current_time, gap_end, "Open Ice"))
-        current_time = gap_end
-    
-    return programs
-
-
-def refresh_chiller_schedule():
-    """Background job to refresh Chiller and LGRIA schedule data"""
-    global CHILLER_SCHEDULE_CACHE
+    global SCHEDULE_CACHE
     
     try:
-        logger.info("🔄 Refreshing Chiller schedule...")
+        logger.info("🔄 Refreshing schedules from all providers...")
         
         now = datetime.now()
         today_start = datetime.combine(now.date(), dt_time(0, 0))
         tomorrow_end = datetime.combine(now.date() + timedelta(days=2), dt_time(0, 0))
         
-        # Fetch Chiller events
-        chiller_events = fetch_chiller_schedule(today_start, tomorrow_end)
-        events_by_surface = group_events_by_surface(chiller_events)
+        # Collect all events from all providers
+        all_events = []
+        provider_stats = []
         
-        # Fetch LGRIA events
-        lgria_raw_events = fetch_lgria_schedule()
-        lgria_events = process_lgria_events(lgria_raw_events, today_start, tomorrow_end)
+        for provider in ALL_PROVIDERS:
+            if not provider.is_enabled():
+                logger.info(f"⏭️  Skipping {provider.name} (disabled)")
+                continue
+            
+            try:
+                events = provider.fetch_schedule(today_start, tomorrow_end)
+                all_events.extend(events)
+                provider_stats.append(f"{len(events)} {provider.name}")
+                logger.info(f"✅ {provider.name}: {len(events)} events")
+            except Exception as e:
+                logger.error(f"❌ {provider.name} failed: {e}")
         
-        # Add LGRIA events to the cache
-        if lgria_events:
-            events_by_surface[LGRIA_SURFACE_ID] = lgria_events
-            logger.info(f"✅ LGRIA schedule added ({len(lgria_events)} processed events)")
+        # Group events by surface using utility function
+        events_by_surface = group_events_by_surface(all_events)
         
-        CHILLER_SCHEDULE_CACHE['events_by_surface'] = events_by_surface
-        CHILLER_SCHEDULE_CACHE['last_updated'] = datetime.now()
+        # Update cache
+        SCHEDULE_CACHE['events_by_surface'] = events_by_surface
+        SCHEDULE_CACHE['last_updated'] = datetime.now()
         
-        total_events = len(chiller_events) + len(lgria_events)
-        logger.info(f"✅ Schedule refreshed ({len(chiller_events)} Chiller + {len(lgria_events)} LGRIA = {total_events} total events)")
+        total_events = len(all_events)
+        stats_str = " + ".join(provider_stats) if provider_stats else "0"
+        logger.info(f"✅ Schedule refreshed: {stats_str} = {total_events} total events")
         
     except Exception as e:
-        logger.error(f"❌ Failed to refresh schedule: {e}")
+        logger.error(f"❌ Failed to refresh schedules: {e}")
 
 
 # --- HTML Template (Embedded) ---
@@ -2116,15 +1898,15 @@ def generate_playlist():
 @app.route('/xmltv')
 def xmltv_endpoint():
     """
-    Generate XMLTV guide for favorited surfaces with Chiller schedule integration.
-    Creates programs with real event schedules from Chiller API.
+    Generate XMLTV guide for favorited surfaces with schedule integration.
+    Creates programs with real event schedules from all providers.
     """
     # Get all favorites
     favorites = get_all_favorites()
     
-    # Use cached Chiller schedule data
-    events_by_surface = CHILLER_SCHEDULE_CACHE.get('events_by_surface', {})
-    last_updated = CHILLER_SCHEDULE_CACHE.get('last_updated')
+    # Use cached schedule data from all providers
+    events_by_surface = SCHEDULE_CACHE.get('events_by_surface', {})
+    last_updated = SCHEDULE_CACHE.get('last_updated')
     
     # Create root TV element
     tv = ET.Element('tv')
@@ -2452,25 +2234,25 @@ if __name__ == '__main__':
     # Initialize and start APScheduler
     scheduler = BackgroundScheduler()
     
-    # Schedule Chiller refresh at 3:00 AM daily
+    # Schedule refresh at 3:00 AM daily (all providers)
     scheduler.add_job(
-        func=refresh_chiller_schedule,
+        func=refresh_schedule,
         trigger='cron',
         hour=3,
         minute=0,
-        id='chiller_refresh',
-        name='Daily Chiller Schedule Refresh'
+        id='schedule_refresh',
+        name='Daily Schedule Refresh (All Providers)'
     )
     
     scheduler.start()
-    logger.info("⏰ Scheduler started - Chiller refresh at 3:00 AM daily")
+    logger.info("⏰ Scheduler started - Schedule refresh at 3:00 AM daily")
     
-    # Do initial Chiller refresh on startup
-    logger.info("🔄 Performing initial Chiller schedule refresh...")
-    refresh_chiller_schedule()
+    # Do initial schedule refresh on startup
+    logger.info("🔄 Performing initial schedule refresh...")
+    refresh_schedule()
     
     print("\n✅ Background scheduler active")
-    print("   → Chiller schedule refreshes daily at 3:00 AM")
+    print("   → Schedule refreshes daily at 3:00 AM")
     print("\nPress Ctrl+C to stop the server.")
     
     # Run the Flask app
