@@ -48,14 +48,22 @@ The web interface allows you to:
    | `LIVEBARN_EMAIL` | your@email.com | Your LiveBarn account email |
    | `LIVEBARN_PASSWORD` | yourpassword | Your LiveBarn account password |
    | `LAN_IP` | 192.168.1.100 | Your server's LAN IP (optional, auto-detected) |
-   | `SERVER_PORT` | 5000 | Web interface port (optional, default: 5000) |
+   | `SERVER_PORT` | 5000 | **External** web interface port (optional, default: 5000) |
    | `LOG_LEVEL` | INFO | Logging level (optional, default: INFO) |
+
+   > Note: `PUBLIC_PORT` is automatically derived from `SERVER_PORT` in Docker/Portainer
+   > installs. You usually don’t need to set it manually.
 
 4. **Deploy the Stack:**
    - Click **Deploy the stack**
    - Wait for the container to start
 
 5. **Access the Application:**
+   - Web UI: `http://YOUR_SERVER_IP:SERVER_PORT`
+   - M3U Playlist: `http://YOUR_SERVER_IP:SERVER_PORT/playlist.m3u`
+   - XMLTV EPG: `http://YOUR_SERVER_IP:SERVER_PORT/xmltv`
+
+   For example, with the default `SERVER_PORT=5000`:
    - Web UI: `http://YOUR_SERVER_IP:5000`
    - M3U Playlist: `http://YOUR_SERVER_IP:5000/playlist.m3u`
    - XMLTV EPG: `http://YOUR_SERVER_IP:5000/xmltv`
@@ -74,7 +82,7 @@ The web interface allows you to:
    LIVEBARN_EMAIL=your@email.com
    LIVEBARN_PASSWORD=yourpassword
    LAN_IP=192.168.1.100
-   SERVER_PORT=5000
+   SERVER_PORT=5000   # External port you’ll use in the browser/M3U/XMLTV URLs
    LOG_LEVEL=INFO
    EOF
    ```
@@ -99,6 +107,22 @@ docker run -d \
   -e LIVEBARN_EMAIL=your@email.com \
   -e LIVEBARN_PASSWORD=yourpassword \
   -e LAN_IP=192.168.1.100 \
+  -e PUBLIC_PORT=5000 \
+  --restart unless-stopped \
+  ghcr.io/kineticman/livebarn-manager:latest
+```
+
+If you want to expose the app on a different host port (e.g. 8653):
+
+```bash
+docker run -d \
+  --name livebarn-manager \
+  -p 8653:5000 \
+  -v livebarn-data:/data \
+  -e LIVEBARN_EMAIL=your@email.com \
+  -e LIVEBARN_PASSWORD=yourpassword \
+  -e LAN_IP=192.168.1.100 \
+  -e PUBLIC_PORT=8653 \
   --restart unless-stopped \
   ghcr.io/kineticman/livebarn-manager:latest
 ```
@@ -237,7 +261,8 @@ See existing providers in `schedule_providers/` for complete examples.
 | `LIVEBARN_EMAIL` | *required* | LiveBarn account email |
 | `LIVEBARN_PASSWORD` | *required* | LiveBarn account password |
 | `LAN_IP` | auto-detect | Server's LAN IP address |
-| `SERVER_PORT` | 5000 | Web server port |
+| `SERVER_PORT` | 5000 | Port the web server listens on (and external port in Docker/Portainer examples) |
+| `PUBLIC_PORT` | auto | Public/external port used in generated URLs (defaults to `SERVER_PORT`) |
 | `LOG_LEVEL` | INFO | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `DB_PATH` | /data/livebarn.db | SQLite database path |
 
