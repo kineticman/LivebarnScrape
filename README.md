@@ -36,8 +36,7 @@ The web interface allows you to:
 2. **Configure the Stack:**
    - **Name**: `livebarn-manager`
    - **Build method**: Repository
-   - **Repository URL**: `https://github.com/kineticman/LivebarnScrape`
-   - **Repository reference**: `main`
+   - **Repository URL**: `https://github.com/kineticman/LivebarnScrape.git`
    - **Compose path**: `docker-compose.yml`
 
 3. **Set Environment Variables:**
