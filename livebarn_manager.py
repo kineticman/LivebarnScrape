@@ -66,6 +66,9 @@ werkzeug_logger.addFilter(LogPollFilter())
 
 # --- Environment Variables ---
 SERVER_PORT = int(os.getenv('SERVER_PORT', '5000'))
+# Port that clients should use in URLs (M3U, XMLTV, UI).
+# Defaults to SERVER_PORT so bare-metal runs don't need extra config.
+PUBLIC_PORT = int(os.getenv('PUBLIC_PORT', str(SERVER_PORT)))
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 LIVEBARN_EMAIL = os.getenv('LIVEBARN_EMAIL')
 LIVEBARN_PASSWORD = os.getenv('LIVEBARN_PASSWORD')
@@ -1704,7 +1707,7 @@ def index():
         venues=venues,
         state_list=state_list,
         server_host=SERVER_HOST_URL,
-        server_port=SERVER_PORT,
+        server_port=PUBLIC_PORT,
         db_path=str(DB_PATH)
     )
 
@@ -1873,7 +1876,7 @@ def generate_playlist():
         if city and state:
             description += f" in {city}, {state}"
         
-        proxy_url = f"http://{SERVER_HOST_URL}:{SERVER_PORT}/proxy/{surface_id}"
+        proxy_url = f"http://{SERVER_HOST_URL}:{PUBLIC_PORT}/proxy/{surface_id}"
         
         # Channels DVR custom tags
         extinf_line = (
@@ -1914,7 +1917,7 @@ def xmltv_endpoint():
     # Create root TV element
     tv = ET.Element('tv')
     tv.set('generator-info-name', 'LiveBarn Manager + Chiller')
-    tv.set('generator-info-url', f'http://{SERVER_HOST_URL}:{SERVER_PORT}')
+    tv.set('generator-info-url', f'http://{SERVER_HOST_URL}:{PUBLIC_PORT}')
     
     # Time range for programs
     now = datetime.now()
@@ -2224,12 +2227,12 @@ if __name__ == '__main__':
     print("=" * 70)
     print(" LiveBarn Favorites Manager & Streamlink Proxy ".center(70, "="))
     print(f"  Database: {DB_PATH}")
-    print(f"  Playlist: http://{SERVER_HOST_URL}:{SERVER_PORT}/playlist.m3u")
-    print(f"  XMLTV:    http://{SERVER_HOST_URL}:{SERVER_PORT}/xmltv")
+    print(f"  Playlist: http://{SERVER_HOST_URL}:{PUBLIC_PORT}/playlist.m3u")
+    print(f"  XMLTV:    http://{SERVER_HOST_URL}:{PUBLIC_PORT}/xmltv")
     print(f"  Server:   http://{SERVER_HOST_URL} (LAN IP detected)")
     print("=" * 70)
     print()
-    print("📖 Open http://localhost:{SERVER_PORT} in your browser to:")
+    print(f"📖 Open http://localhost:{PUBLIC_PORT} in your browser to:")
     print("   1. Browse venues and add/remove favorites.")
     print("   2. Get the proxy playlist URL for your video player.")
     print()
