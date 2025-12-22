@@ -1197,7 +1197,11 @@ HTML_TEMPLATE = r"""
                                 {% endif %}
                             </div>
                             <div class="venue-location">
-                                {{ venue.city }}, {{ venue.state }}{% if venue.country %}, {{ venue.country }}{% endif %}
+                                {% set parts = [] %}
+                                {% if venue.city %}{% set _ = parts.append(venue.city) %}{% endif %}
+                                {% if venue.state %}{% set _ = parts.append(venue.state) %}{% endif %}
+                                {% if venue.country %}{% set _ = parts.append(venue.country) %}{% endif %}
+                                {{ ", ".join(parts) }}
                             </div>
                             <div class="venue-meta">
                                 <span>Venue ID: {{ venue.id }}</span>
