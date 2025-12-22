@@ -533,6 +533,42 @@ HTML_TEMPLATE = r"""
             font-size: 13px;
         }
 
+        .btn-regenerate {
+            width: 100%;
+            padding: 10px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: 10px;
+            border: 1px solid rgba(34, 197, 94, 0.6);
+            background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.25), transparent 55%),
+                        rgba(17, 24, 39, 0.95);
+            color: #bbf7d0;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .btn-regenerate:hover {
+            transform: translateY(-1px);
+            box-shadow:
+                0 0 0 1px rgba(34, 197, 94, 0.6),
+                0 12px 32px rgba(15, 23, 42, 0.9);
+            background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.35), transparent 55%),
+                        rgba(15, 23, 42, 0.98);
+            border-color: rgba(34, 197, 94, 0.8);
+        }
+
+        .btn-regenerate:active {
+            transform: translateY(0);
+        }
+
+        .btn-regenerate span.icon {
+            font-size: 14px;
+        }
+
         .playlist-hint {
             margin-top: 5px;
             font-size: 11px;
@@ -1116,6 +1152,14 @@ HTML_TEMPLATE = r"""
                 </div>
             </div>
 
+            <!-- Regenerate Button -->
+            <div style="margin-bottom: 12px;">
+                <button class="btn-regenerate" onclick="regeneratePlaylists()" title="Refresh M3U and XMLTV data">
+                    <span class="icon">🔄</span>
+                    Regenerate M3U/XMLTV
+                </button>
+            </div>
+
             <!-- Favorites List -->
             <div class="favorites-list">
                 <div id="favoritesListContainer">
@@ -1318,6 +1362,31 @@ HTML_TEMPLATE = r"""
             } catch (err) {
                 console.error("Clipboard error:", err);
                 showToast("Failed to copy XMLTV URL. Right-click and copy manually.", "error");
+            }
+        }
+
+        async function regeneratePlaylists() {
+            try {
+                showToast("Regenerating M3U/XMLTV data...", "info");
+                
+                const response = await fetch("/api/regenerate", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok || !data.success) {
+                    showToast(data.message || "Failed to regenerate playlists", "error");
+                    return;
+                }
+
+                showToast(data.message || "M3U/XMLTV regenerated successfully", "success");
+            } catch (err) {
+                console.error("Regenerate error:", err);
+                showToast("Error regenerating playlists", "error");
             }
         }
 
@@ -1877,6 +1946,44 @@ def api_get_logs():
         return jsonify({
             "lines": [],
             "error": "Failed to read logs."
+        }), 500
+
+
+@app.route('/api/regenerate', methods=['POST'])
+def api_regenerate_playlists():
+    """
+    Trigger regeneration of M3U/XMLTV files.
+    This doesn't actually write files, but forces a refresh of the schedule cache
+    so the next /playlist.m3u and /xmltv requests will have fresh data.
+    """
+    try:
+        logger.info("=" * 70)
+        logger.info("🔄 MANUAL REGENERATION TRIGGERED VIA API")
+        logger.info("=" * 70)
+        
+        # Force refresh the schedule cache
+        refresh_schedule()
+        
+        # Get cache stats
+        events_by_surface = SCHEDULE_CACHE.get('events_by_surface', {})
+        last_updated = SCHEDULE_CACHE.get('last_updated')
+        
+        total_surfaces = len(events_by_surface)
+        total_events = sum(len(events) for events in events_by_surface.values())
+        
+        logger.info(f"📊 Cache updated: {total_surfaces} surfaces, {total_events} events")
+        logger.info(f"⏰ Last updated: {last_updated}")
+        logger.info("=" * 70)
+        
+        return jsonify({
+            "success": True,
+            "message": f"M3U/XMLTV refreshed: {total_surfaces} surfaces, {total_events} events"
+        })
+    except Exception as e:
+        logger.error(f"❌ Error during manual regeneration: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "message": f"Error refreshing data: {str(e)}"
         }), 500
 
 
