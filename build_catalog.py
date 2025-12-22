@@ -110,8 +110,9 @@ def build_catalog():
             # Insert/update venue
             # Normalize some fields that differ across regions
             city = venue.get('city')
-            # LiveBarn may use different keys for state/province across countries
-            state = (
+
+            # LiveBarn may use different keys for state/province across countries.
+            raw_state = (
                 venue.get('state')
                 or venue.get('stateCode')
                 or venue.get('state_code')
@@ -120,12 +121,34 @@ def build_catalog():
                 or venue.get('stateProvince')
                 or venue.get('region')
             )
-            postal_code = (
+            if isinstance(raw_state, dict):
+                state = (
+                    raw_state.get('code')
+                    or raw_state.get('abbr')
+                    or raw_state.get('shortCode')
+                    or raw_state.get('name')
+                    or raw_state.get('id')
+                    or str(raw_state)
+                )
+            else:
+                state = raw_state
+
+            raw_postal = (
                 venue.get('postalCode')
                 or venue.get('postal_code')
                 or venue.get('zip')
                 or venue.get('zipCode')
             )
+            if isinstance(raw_postal, dict):
+                postal_code = (
+                    raw_postal.get('code')
+                    or raw_postal.get('postalCode')
+                    or raw_postal.get('zip')
+                    or raw_postal.get('zipCode')
+                    or str(raw_postal)
+                )
+            else:
+                postal_code = raw_postal
 
             c.execute('''
                 INSERT OR REPLACE INTO venues (
