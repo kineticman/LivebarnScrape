@@ -25,6 +25,31 @@ import xml.etree.ElementTree as ET
 from schedule_providers import ALL_PROVIDERS
 from schedule_utils import group_events_by_surface, fill_gaps_with_open_ice 
 
+
+INVALID_FS_CHARS = set('\\/:*?"<>|')
+
+def sanitize_title_for_filesystem(text: str) -> str:
+    """
+    Sanitize titles/names so that downstream DVRs (like Channels) don't
+    create invalid filesystem paths on Windows/exFAT.
+
+    - Replaces control characters (including tabs/newlines) with a space
+    - Replaces Windows-invalid path characters: \/:*?"<>|
+    - Collapses multiple spaces
+    """
+    if not text:
+        return ""
+    cleaned_chars = []
+    for ch in text:
+        if ord(ch) < 32 or ch in INVALID_FS_CHARS:
+            cleaned_chars.append(" ")
+        else:
+            cleaned_chars.append(ch)
+    cleaned = "".join(cleaned_chars)
+    # Collapse whitespace
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -1865,7 +1890,8 @@ def generate_playlist():
         city = fav.get('city', '')
         state = fav.get('state', '')
         
-        title = f"{venue_name} - {surface_name}"
+        raw_title = f"{venue_name} - {surface_name}"
+        title = sanitize_title_for_filesystem(raw_title)
         if city or state:
             location = f" ({city}, {state})" if city and state else f" ({city or state})"
         else:
@@ -1945,11 +1971,11 @@ def xmltv_endpoint():
         channel.set('id', str(surface_id))
         
         display_name = ET.SubElement(channel, 'display-name')
-        display_name.text = title
+        display_name.text = sanitize_title_for_filesystem(title)
         
         if location_str:
             display_name_loc = ET.SubElement(channel, 'display-name')
-            display_name_loc.text = location_str
+            display_name_loc.text = sanitize_title_for_filesystem(location_str)
         
         # Icon
         icon = ET.SubElement(channel, 'icon')
@@ -1985,7 +2011,7 @@ def xmltv_endpoint():
             # Program title
             title_elem = ET.SubElement(programme, 'title')
             title_elem.set('lang', 'en')
-            title_elem.text = prog_title
+            title_elem.text = sanitize_title_for_filesystem(prog_title)
             
             # Description
             desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
