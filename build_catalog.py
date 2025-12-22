@@ -108,6 +108,25 @@ def build_catalog():
     for venue in venues_data:
         try:
             # Insert/update venue
+            # Normalize some fields that differ across regions
+            city = venue.get('city')
+            # LiveBarn may use different keys for state/province across countries
+            state = (
+                venue.get('state')
+                or venue.get('stateCode')
+                or venue.get('state_code')
+                or venue.get('province')
+                or venue.get('provinceCode')
+                or venue.get('stateProvince')
+                or venue.get('region')
+            )
+            postal_code = (
+                venue.get('postalCode')
+                or venue.get('postal_code')
+                or venue.get('zip')
+                or venue.get('zipCode')
+            )
+
             c.execute('''
                 INSERT OR REPLACE INTO venues (
                     id, uuid, name, address, city, state, postal_code, 
@@ -118,9 +137,9 @@ def build_catalog():
                 venue.get('uuid'),
                 venue.get('name'),
                 venue.get('address'),
-                venue.get('city'),
-                venue.get('state'),
-                venue.get('postalCode'),
+                city,
+                state,
+                postal_code,
                 venue.get('country'),
                 venue.get('latitude'),
                 venue.get('longitude'),
