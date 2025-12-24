@@ -131,6 +131,12 @@ else:
 
 # --- Database Configuration ---
 DB_PATH = Path(os.getenv('DB_PATH', '/data/livebarn.db'))
+
+# CRITICAL FIX: Ensure the database directory exists
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger.info(f"📁 Database directory: {DB_PATH.parent}")
+logger.info(f"💾 Database file: {DB_PATH}")
+
 # Keep this fairly short so UI errors out quickly instead of appearing frozen on locks
 SQLITE_TIMEOUT = 3
 
@@ -231,1323 +237,327 @@ HTML_TEMPLATE = r"""
         header .left {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 16px;
         }
 
         header h1 {
-            font-size: 20px;
             margin: 0;
-            letter-spacing: 0.03em;
+            font-size: 24px;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            color: #f8fafc;
         }
 
-        header h1 span.badge {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: rgba(37, 99, 235, 0.15);
-            color: #93c5fd;
-            border: 1px solid rgba(59, 130, 246, 0.45);
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-        }
-
-        header .subtitle {
-            font-size: 12px;
-            color: #9ca3af;
-            margin-top: 2px;
-        }
-
-        header .status-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            padding: 3px 10px;
-            border-radius: 999px;
-            background: rgba(22, 163, 74, 0.1);
-            color: #bbf7d0;
-            border: 1px solid rgba(34, 197, 94, 0.5);
-        }
-
-        header .status-pill::before {
-            content: "";
-            width: 7px;
-            height: 7px;
-            border-radius: 999px;
-            background: #22c55e;
-            box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.25);
-        }
-
-        main {
-            padding: 16px 24px 24px;
-            display: grid;
-            grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
-            gap: 18px;
-            align-items: flex-start;
-        }
-
-        @media (max-width: 960px) {
-            main {
-                grid-template-columns: minmax(0, 1fr);
-            }
-        }
-
-        .panel {
-            background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 55%),
-                        radial-gradient(circle at bottom right, rgba(147, 51, 234, 0.14), transparent 55%),
-                        rgba(15, 23, 42, 0.96);
-            border-radius: 16px;
-            padding: 12px 12px 10px;
-            border: 1px solid rgba(148, 163, 184, 0.45);
-            box-shadow:
-                0 18px 40px rgba(15, 23, 42, 0.85),
-                0 0 0 1px rgba(15, 23, 42, 0.9),
-                0 0 40px rgba(37, 99, 235, 0.18);
-            backdrop-filter: blur(16px);
-        }
-
-        .panel-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-
-        .panel-title {
+        header .badge {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #60a5fa;
+            padding: 4px 12px;
+            border-radius: 6px;
             font-size: 13px;
-            text-transform: uppercase;
-            letter-spacing: 0.14em;
-            color: #9ca3af;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .panel-title span.dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 999px;
-            background: #4ade80;
-            box-shadow: 0 0 12px rgba(74, 222, 128, 0.75);
-        }
-
-        .panel-subtitle {
-            font-size: 12px;
-            color: #6b7280;
-        }
-
-        .pill {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            color: #e5e7eb;
-            background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(17, 24, 39, 0.9));
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .pill code {
-            font-size: 10px;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            color: #a5b4fc;
-        }
-
-        .pill .dot {
-            width: 4px;
-            height: 4px;
-            border-radius: 999px;
-            background: #a855f7;
-        }
-
-        .pill strong {
-            font-weight: 600;
-            color: #e5e7eb;
-        }
-
-        .pill span.tip {
-            color: #9ca3af;
-            font-weight: 400;
-        }
-
-        .favorites-panel {
-            position: sticky;
-            top: 84px;
-        }
-        .logs-panel {
-            grid-column: 2;
-        }
-
-        .logs-container {
-            margin-top: 8px;
-            background: rgba(15, 23, 42, 0.96);
-            border-radius: 12px;
-            border: 1px solid rgba(31, 41, 55, 0.95);
-            max-height: 600px;
-            overflow-y: auto;
-            padding: 14px 16px;
-        }
-
-        #liveLogs {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            font-size: 13px;
-            line-height: 1.6;
-            margin: 0;
-            white-space: pre-wrap;
-            color: #e5e7eb;
-        }
-
-
-        .favorites-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        .favorites-header-left {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .favorites-title {
-            font-size: 14px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .favorites-title .star {
-            color: #fbbf24;
-            text-shadow: 0 0 10px rgba(251, 191, 36, 0.75);
-        }
-
-        .favorites-caption {
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .favorites-count-pill {
-            font-size: 11px;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: rgba(59, 130, 246, 0.08);
-            color: #bfdbfe;
-            border: 1px solid rgba(59, 130, 246, 0.5);
-        }
-
-        .playlist-card {
-            margin-bottom: 8px;
-            padding: 8px 10px;
-            background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.15), transparent 55%),
-                        rgba(15, 23, 42, 0.98);
-            border-radius: 12px;
-            border: 1px solid rgba(96, 165, 250, 0.55);
-            box-shadow:
-                0 0 0 1px rgba(15, 23, 42, 0.9),
-                0 10px 30px rgba(15, 23, 42, 0.9),
-                0 0 30px rgba(59, 130, 246, 0.25);
-        }
-
-        .playlist-label {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.16em;
-            color: #93c5fd;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .playlist-label span.indicator {
-            width: 7px;
-            height: 7px;
-            border-radius: 999px;
-            background: #60a5fa;
-            box-shadow: 0 0 18px rgba(59, 130, 246, 0.9);
-        }
-
-        .playlist-url-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 8px;
-            align-items: center;
-        }
-
-        .playlist-url {
-            font-size: 12px;
-            background: rgba(15, 23, 42, 0.9);
-            border-radius: 8px;
-            padding: 7px 10px;
-            border: 1px solid rgba(30, 64, 175, 0.8);
-            font-family: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-            color: #e5e7eb;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            cursor: pointer;
-        }
-
-        .playlist-url:hover {
-            border-color: rgba(129, 140, 248, 0.9);
-            box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.4);
-        }
-
-        .playlist-url code {
-            font-size: 11px;
-        }
-
-        .btn-copy {
-            padding: 6px 10px;
-            font-size: 11px;
-            border-radius: 999px;
-            border: 1px solid rgba(129, 140, 248, 0.85);
-            background: radial-gradient(circle at top left, rgba(129, 140, 248, 0.35), transparent 55%),
-                        rgba(17, 24, 39, 0.95);
-            color: #e5e7eb;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-copy:hover {
-            transform: translateY(-0.5px);
-            box-shadow:
-                0 0 0 1px rgba(129, 140, 248, 0.6),
-                0 10px 28px rgba(15, 23, 42, 0.9);
-            background: radial-gradient(circle at top left, rgba(129, 140, 248, 0.45), transparent 55%),
-                        rgba(15, 23, 42, 0.98);
-        }
-
-        .btn-copy span.icon {
-            font-size: 13px;
-        }
-
-        .btn-regenerate {
-            width: 100%;
-            padding: 10px 14px;
-            font-size: 12px;
             font-weight: 500;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .search-bar {
+            background: #1e293b;
+            padding: 20px;
             border-radius: 10px;
-            border: 1px solid rgba(34, 197, 94, 0.6);
-            background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.25), transparent 55%),
-                        rgba(17, 24, 39, 0.95);
-            color: #bbf7d0;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.2s ease;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
 
-        .btn-regenerate:hover {
-            transform: translateY(-1px);
-            box-shadow:
-                0 0 0 1px rgba(34, 197, 94, 0.6),
-                0 12px 32px rgba(15, 23, 42, 0.9);
-            background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.35), transparent 55%),
-                        rgba(15, 23, 42, 0.98);
-            border-color: rgba(34, 197, 94, 0.8);
-        }
-
-        .btn-regenerate:active {
-            transform: translateY(0);
-        }
-
-        .btn-regenerate span.icon {
-            font-size: 14px;
-        }
-
-        .playlist-hint {
-            margin-top: 5px;
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .playlist-hint code {
-            font-size: 10px;
-            color: #a5b4fc;
-        }
-
-        .favorites-list {
-            border-radius: 12px;
-            background: rgba(15, 23, 42, 0.96);
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            max-height: 380px;
-            overflow-y: auto;
+        .search-bar form {
             display: flex;
-            flex-direction: column;
-        }
-
-        .favorites-empty {
-            padding: 16px 20px;
-            text-align: center;
-            border-bottom: 1px solid rgba(31, 41, 55, 0.95);
-            background: radial-gradient(circle at top, rgba(148, 163, 184, 0.22), transparent 55%);
-        }
-
-        .favorites-empty h3 {
-            margin: 0 0 4px;
-            font-size: 12px;
-        }
-
-        .favorites-empty p {
-            margin: 0;
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .favorites-empty strong {
-            color: #e5e7eb;
-        }
-
-        .favorites-scroll {
-            overflow-y: auto;
-            max-height: 380px;
-        }
-
-        .favorites-item {
-            padding: 10px 14px;
-            border-bottom: 1px solid rgba(31, 41, 55, 0.95);
-            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
             align-items: center;
-            gap: 10px;
         }
 
-        .favorites-item:last-child {
-            border-bottom: none;
-        }
-
-        .favorites-leading {
-            width: 8px;
-            height: 100%;
-            border-radius: 999px;
-            background: linear-gradient(to bottom, #fbbf24, #f97316);
-            box-shadow: 0 0 18px rgba(249, 115, 22, 0.75);
-        }
-
-        .favorites-main {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .favorites-main .venue-name {
-            font-size: 13px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .favorites-main .surface-name {
-            font-size: 12px;
-            color: #9ca3af;
-        }
-
-        .favorites-meta {
-            font-size: 11px;
-            color: #6b7280;
-        }
-
-        .favorites-meta span {
-            margin-right: 8px;
-        }
-
-        .favorites-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .btn-unfavorite {
-            padding: 4px 9px;
-            border-radius: 999px;
-            border: 1px solid rgba(239, 68, 68, 0.8);
-            background: rgba(127, 29, 29, 0.95);
-            color: #fecaca;
-            font-size: 11px;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-unfavorite:hover {
-            background: rgba(153, 27, 27, 0.95);
-            box-shadow:
-                0 0 0 1px rgba(239, 68, 68, 0.6),
-                0 10px 24px rgba(15, 23, 42, 0.9);
-        }
-
-        .btn-unfavorite span.icon {
-            font-size: 13px;
-        }
-
-        .avatar {
-            font-size: 20px;
-            color: #fbbf24;
-            text-shadow: 0 0 14px rgba(251, 191, 36, 0.85);
-        }
-
-        .filters-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 180px);
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
-        @media (max-width: 768px) {
-            .filters-row {
-                grid-template-columns: minmax(0, 1fr);
-            }
-        }
-
-        .filters-row label {
-            display: block;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: #9ca3af;
-            margin-bottom: 4px;
-        }
-
-        .filters-row label span {
-            font-size: 10px;
-            color: #6b7280;
-            text-transform: none;
-            letter-spacing: 0;
-        }
-
-        .input, .select {
-            width: 100%;
-            padding: 7px 10px;
-            font-size: 12px;
-            background: rgba(15, 23, 42, 0.96);
+        .search-bar input[type="text"],
+        .search-bar select {
+            padding: 10px 16px;
             border-radius: 8px;
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            color: #e5e7eb;
-            font-family: inherit;
+            border: 1px solid #334155;
+            background: #0f172a;
+            color: #f1f5f9;
+            font-size: 14px;
+            min-width: 200px;
+            flex: 1;
         }
 
-        .input::placeholder {
-            color: #6b7280;
+        .search-bar button {
+            padding: 10px 24px;
+            border-radius: 8px;
+            border: none;
+            background: #3b82f6;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
         }
 
-        .input:focus, .select:focus {
-            outline: none;
-            border-color: rgba(59, 130, 246, 0.8);
-            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.4);
+        .search-bar button:hover {
+            background: #2563eb;
         }
 
-        .venues-container {
-            border-radius: 12px;
-            background: rgba(15, 23, 42, 0.96);
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            overflow: hidden;
+        .search-bar a {
+            padding: 10px 24px;
+            border-radius: 8px;
+            background: #475569;
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
         }
 
-        .venues-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            border-bottom: 1px solid rgba(31, 41, 55, 0.95);
-            background: radial-gradient(circle at top left, rgba(148, 163, 184, 0.22), transparent 55%);
+        .search-bar a:hover {
+            background: #64748b;
         }
 
-        .venues-header-left {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            color: #9ca3af;
+        .section {
+            background: #1e293b;
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
 
-        .venues-header-left .count {
-            font-size: 16px;
+        .section h2 {
+            margin: 0 0 20px 0;
+            font-size: 20px;
             font-weight: 600;
-            color: #e5e7eb;
-        }
-
-        .venues-header-left .dim {
-            color: #6b7280;
-        }
-
-        .venues-header-right {
-            font-size: 11px;
-            color: #9ca3af;
-        }
-
-        .venues-list {
-            overflow-y: auto;
-            max-height: 520px;
-        }
-
-        .venue-row {
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(31, 41, 55, 0.95);
+            color: #f8fafc;
             display: flex;
             align-items: center;
             gap: 10px;
-            cursor: pointer;
         }
 
-        .venue-row:last-child {
-            border-bottom: none;
-        }
-
-        .venue-row:hover {
-            background: rgba(30, 64, 175, 0.12);
-        }
-
-        .venue-marker {
-            width: 8px;
-            height: 100%;
-            border-radius: 999px;
-            background: linear-gradient(to bottom, #3b82f6, #2563eb);
-            box-shadow: 0 0 16px rgba(59, 130, 246, 0.65);
-        }
-
-        .venue-main {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .venue-name-line {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 13px;
-            font-weight: 500;
-        }
-
-        .venue-name-line .badge {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 999px;
-            background: rgba(251, 191, 36, 0.12);
+        .section h2::before {
+            content: "★";
+            font-size: 24px;
             color: #fbbf24;
-            border: 1px solid rgba(251, 191, 36, 0.6);
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
         }
 
-        .venue-location {
-            font-size: 12px;
-            color: #9ca3af;
-        }
-
-        .venue-meta {
-            font-size: 11px;
-            color: #6b7280;
-        }
-
-        .venue-meta span {
-            margin-right: 8px;
-        }
-
-        .venue-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .btn-view-surfaces {
-            padding: 4px 9px;
-            border-radius: 999px;
-            border: 1px solid rgba(59, 130, 246, 0.8);
-            background: rgba(30, 64, 175, 0.9);
-            color: #bfdbfe;
-            font-size: 11px;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .btn-view-surfaces:hover {
-            background: rgba(30, 64, 175, 0.95);
-            box-shadow:
-                0 0 0 1px rgba(59, 130, 246, 0.6),
-                0 10px 24px rgba(15, 23, 42, 0.9);
-        }
-
-        .btn-view-surfaces span.icon {
-            font-size: 13px;
-        }
-
-        .badge-count {
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 999px;
-            background: rgba(15, 23, 42, 0.96);
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            color: #9ca3af;
-        }
-
-        .toast {
-            position: fixed;
-            bottom: 18px;
-            right: 18px;
-            background: rgba(15, 23, 42, 0.98);
-            border-radius: 999px;
-            padding: 8px 12px;
-            font-size: 12px;
-            color: #e5e7eb;
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            box-shadow:
-                0 0 0 1px rgba(15, 23, 42, 0.9),
-                0 16px 40px rgba(15, 23, 42, 0.95);
-            display: none;
-            align-items: center;
-            gap: 8px;
-            z-index: 50;
-        }
-
-        .toast span.icon {
+        table {
+            width: 100%;
+            border-collapse: collapse;
             font-size: 14px;
         }
 
-        .toast.toast-success {
-            border-color: rgba(34, 197, 94, 0.9);
-            color: #bbf7d0;
+        table thead {
+            background: #0f172a;
         }
 
-        .toast.toast-error {
-            border-color: rgba(239, 68, 68, 0.9);
-            color: #fecaca;
+        table th {
+            text-align: left;
+            padding: 12px 16px;
+            font-weight: 600;
+            color: #cbd5e1;
+            border-bottom: 2px solid #334155;
         }
 
-        .toast.toast-info {
-            border-color: rgba(59, 130, 246, 0.9);
-            color: #bfdbfe;
+        table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #334155;
         }
 
-        .toast button {
-            background: transparent;
-            border: none;
-            color: inherit;
-            font-size: 14px;
-            cursor: pointer;
-            padding: 0;
-            margin-left: 4px;
+        table tbody tr {
+            transition: background 0.15s;
         }
 
-        .pill-list {
-            margin-top: 6px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-            font-size: 11px;
-            color: #9ca3af;
+        table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.08);
         }
 
-        .pill-list span {
-            padding: 2px 7px;
-            border-radius: 999px;
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            background: rgba(15, 23, 42, 0.96);
-        }
-
-        .pill-list span strong {
-            color: #e5e7eb;
-        }
-
-        .nav-bar {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-badge {
-            font-size: 11px;
-            padding: 2px 9px;
-            border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.7);
-            background: rgba(15, 23, 42, 0.96);
-            color: #e5e7eb;
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-        }
-
-        .nav-badge span.dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 999px;
-            background: #f97316;
-            box-shadow: 0 0 12px rgba(249, 115, 22, 0.7);
-        }
-
-        .nav-badge code {
-            font-size: 10px;
-            color: #a5b4fc;
-        }
-
-        .nav-links {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .nav-link {
-            font-size: 11px;
-            color: #9ca3af;
+        .venue-link {
+            color: #60a5fa;
             text-decoration: none;
-            padding: 3px 8px;
-            border-radius: 999px;
-            border: 1px solid transparent;
+            font-weight: 500;
+            transition: color 0.2s;
         }
 
-        .nav-link:hover {
-            border-color: rgba(55, 65, 81, 0.9);
-            background: rgba(15, 23, 42, 0.96);
-            color: #e5e7eb;
-        }
-
-        .nav-link-primary {
-            border-color: rgba(59, 130, 246, 0.7);
-            color: #bfdbfe;
-            background: rgba(30, 64, 175, 0.9);
-        }
-
-        .nav-link-primary:hover {
-            background: rgba(30, 64, 175, 0.98);
-            box-shadow:
-                0 0 0 1px rgba(37, 99, 235, 0.6),
-                0 10px 26px rgba(15, 23, 42, 0.9);
-        }
-
-        .pill-small {
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 999px;
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            background: rgba(15, 23, 42, 0.96);
-            color: #9ca3af;
-        }
-
-        .pill-small strong {
-            color: #e5e7eb;
-        }
-
-        .btn-state-filter {
-            padding: 2px 8px;
-            font-size: 10px;
-            border-radius: 999px;
-            border: 1px solid rgba(55, 65, 81, 0.9);
-            background: rgba(15, 23, 42, 0.96);
-            color: #9ca3af;
-            cursor: pointer;
-        }
-
-        .btn-state-filter.active {
-            border-color: rgba(59, 130, 246, 0.8);
-            background: rgba(30, 64, 175, 0.9);
-            color: #bfdbfe;
-        }
-
-        .state-badges {
-            margin-top: 6px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-        }
-
-        .btn-minimal {
-            padding: 0;
-            border: none;
-            background: transparent;
-            color: #9ca3af;
-            font-size: 11px;
-            cursor: pointer;
+        .venue-link:hover {
+            color: #93c5fd;
             text-decoration: underline;
         }
 
-        .btn-minimal:hover {
-            color: #e5e7eb;
+        .favorite-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #4ade80;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: none;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #94a3b8;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-active {
+            background: #22c55e;
+            box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+        }
+
+        .status-inactive {
+            background: #64748b;
+        }
+
+        .info-box {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid #3b82f6;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+
+        .info-box code {
+            background: #0f172a;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            color: #60a5fa;
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: #64748b;
+            font-size: 13px;
         }
     </style>
 </head>
 <body>
     <header>
         <div class="left">
-            <div>
-                <h1>
-                    LiveBarn Manager
-                    <span class="badge">v2.0</span>
-                </h1>
-                <div class="subtitle">Favorites • Playlists • Streamlink Proxy</div>
-            </div>
-        </div>
-        <div class="status-pill">
-            Server Online
+            <h1>🏒 LiveBarn Manager</h1>
+            <span class="badge">{{ venues|length }} Venues</span>
         </div>
     </header>
 
-    <main>
-        <!-- Favorites Panel (Left) -->
-        <div class="panel favorites-panel">
-            <div class="favorites-header">
-                <div class="favorites-header-left">
-                    <div class="favorites-title">
-                        <span class="star">★</span>
-                        Favorites
-                    </div>
-                    <div class="favorites-caption" id="favoritesCount">0 selected</div>
-                </div>
-                <button class="favorites-count-pill" onclick="refreshFavoritesList()" title="Refresh favorites">
-                    🔄 Refresh
-                </button>
-            </div>
-
-            <!-- M3U Playlist Card -->
-            <div class="playlist-card">
-                <div class="playlist-label">
-                    <span class="indicator"></span>
-                    M3U Playlist
-                </div>
-                <div class="playlist-url-row">
-                    <div class="playlist-url" onclick="copyPlaylistUrl()" title="Click to copy">
-                        <code id="playlistUrl">Loading...</code>
-                    </div>
-                    <button class="btn-copy" onclick="copyPlaylistUrl()" title="Copy to clipboard">
-                        <span class="icon">📋</span>
-                        Copy
-                    </button>
-                </div>
-                <div class="playlist-hint">
-                    Use this URL in <code>Channels DVR → Sources → Custom Channels</code>
-                </div>
-            </div>
-
-            <!-- XMLTV Guide Card -->
-            <div class="playlist-card">
-                <div class="playlist-label">
-                    <span class="indicator"></span>
-                    XMLTV Guide
-                </div>
-                <div class="playlist-url-row">
-                    <div class="playlist-url" onclick="copyXmltvUrl()" title="Click to copy">
-                        <code>http://{{ server_host }}:{{ server_port }}/xmltv</code>
-                    </div>
-                    <button class="btn-copy" onclick="copyXmltvUrl()" title="Copy to clipboard">
-                        <span class="icon">📋</span>
-                        Copy
-                    </button>
-                </div>
-                <div class="playlist-hint">
-                    Use this URL in <code>Channels DVR → Settings → Guide Data → XMLTV</code>
-                </div>
-            </div>
-
-            <!-- Regenerate Button -->
-            <div style="margin-bottom: 12px;">
-                <button class="btn-regenerate" onclick="regeneratePlaylists()" title="Refresh M3U and XMLTV data">
-                    <span class="icon">🔄</span>
-                    Regenerate M3U/XMLTV
-                </button>
-            </div>
-
-            <!-- Favorites List -->
-            <div class="favorites-list">
-                <div id="favoritesListContainer">
-                    <div class="favorites-empty">
-                        <h3>Loading favorites...</h3>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Venues / Surfaces Panel -->
-        <div class="panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <span class="dot"></span>
-                        VENUES &amp; SURFACES
-                    </div>
-                    <div class="panel-subtitle">
-                        Search by name/city, filter by state, then drill into each venue to select surfaces.
-                    </div>
-                </div>
-                <div class="pill">
-                    <span class="dot"></span>
-                    <span><strong>DB:</strong> <code>{{ db_path }}</code></span>
-                </div>
-            </div>
-
-            <div class="filters-row">
-                <div>
-                    <label for="searchInput">
-                        Search
-                        <span>(venue or city)</span>
-                    </label>
-                    <input
-                        type="text"
-                        id="searchInput"
-                        class="input"
-                        placeholder="Start typing to filter venue list..."
-                        onkeydown="if (event.key === 'Enter') onFiltersChange()"
-                    />
-                </div>
-                <div>
-                    <label for="stateSelect">
-                        State
-                        <span>(optional)</span>
-                    </label>
-                    <select id="stateSelect" class="select" onchange="onFiltersChange()">
-                        <option value="">All states</option>
-                        {% for state in state_list %}
-                        <option value="{{ state }}">{{ state }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-            </div>
-
-            <div class="venues-container">
-                <div class="venues-header">
-                    <div class="venues-header-left">
-                        <span class="count" id="venueCount">{{ venues|length }}</span>
-                        venues
-                        <span class="dim">(scrollable)</span>
-                    </div>
-                    <div class="venues-header-right">
-                        <span class="pill-small">
-                            <strong>Hint:</strong> Click a venue row to open its surfaces.
-                        </span>
-                    </div>
-                </div>
-
-                <div class="venues-list" id="venuesList">
-                    {% for venue in venues %}
-                    <div class="venue-row" onclick="openVenue({{ venue.id }})">
-                        <div class="venue-marker"></div>
-                        <div class="venue-main">
-                            <div class="venue-name-line">
-                                <span>{{ venue.name }}</span>
-                                {% if venue.is_favorite_venue %}
-                                <span class="badge">HAS FAVORITES</span>
-                                {% endif %}
-                            </div>
-                            <div class="venue-location">
-                                {% set parts = [] %}
-                                {% if venue.city %}{% set _ = parts.append(venue.city) %}{% endif %}
-                                {% if venue.state %}{% set _ = parts.append(venue.state) %}{% endif %}
-                                {% if venue.country %}{% set _ = parts.append(venue.country) %}{% endif %}
-                                {{ ", ".join(parts) }}
-                            </div>
-                            <div class="venue-meta">
-                                <span>Venue ID: {{ venue.id }}</span>
-                                <span>UUID: {{ venue.uuid }}</span>
-                            </div>
-                        </div>
-                        <div class="venue-actions">
-                            {% if venue.favorite_count and venue.favorite_count > 0 %}
-                            <span class="badge-count">{{ venue.favorite_count }} favorited surfaces</span>
-                            {% else %}
-                            <span class="badge-count">No favorites yet</span>
-                            {% endif %}
-                            <button class="btn-view-surfaces" type="button">
-                                <span class="icon">➡</span>
-                                View surfaces
-                            </button>
-                        </div>
-                    </div>
+    <div class="container">
+        <div class="search-bar">
+            <form method="GET" action="/">
+                <input type="text" name="search" placeholder="Search venues or cities..." value="{{ request.args.get('search', '') }}">
+                <select name="state">
+                    <option value="">All States</option>
+                    {% for state in state_list %}
+                    <option value="{{ state }}" {% if request.args.get('state') == state %}selected{% endif %}>{{ state }}</option>
                     {% endfor %}
-                </div>
-            </div>
+                </select>
+                <button type="submit">🔍 Search</button>
+                <a href="/">Clear Filters</a>
+            </form>
         </div>
-    
-        <!-- Live Logs Panel -->
-        <div class="panel logs-panel">
-            <div class="panel-header">
-                <div>
-                    <div class="panel-title">
-                        <span class="dot"></span>
-                        LIVE LOGS
-                    </div>
-                    <div class="panel-subtitle">
-                        Recent activity from the LiveBarn manager &amp; proxy (auto-refreshes every 4 seconds).
-                    </div>
-                </div>
-            </div>
-            <div class="logs-container">
-                <pre id="liveLogs">Loading logs...</pre>
-            </div>
-        </div>
-</main>
 
-    <div class="toast" id="toast">
-        <span class="icon">🔔</span>
-        <span id="toastMessage"></span>
-        <button onclick="hideToast()" aria-label="Close toast">&times;</button>
+        <div class="section">
+            <h2>Venues</h2>
+            {% if venues %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Location</th>
+                        <th>Country</th>
+                        <th>Favorites</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for venue in venues %}
+                    <tr>
+                        <td>
+                            <a href="/venue/{{ venue.id }}" class="venue-link">{{ venue.name }}</a>
+                        </td>
+                        <td>{{ venue.city }}, {{ venue.state }}</td>
+                        <td>{{ venue.country }}</td>
+                        <td>
+                            {% if venue.favorite_count > 0 %}
+                            <span class="favorite-badge">{{ venue.favorite_count }}</span>
+                            {% else %}
+                            <span style="color: #64748b;">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="/venue/{{ venue.id }}" class="btn btn-primary">View Surfaces</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No venues found. Try adjusting your search filters.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="info-box">
+            <strong>📡 Playlist URL:</strong> <code>http://{{ server_host }}:{{ server_port }}/playlist.m3u</code><br>
+            <strong>📺 XMLTV Guide:</strong> <code>http://{{ server_host }}:{{ server_port }}/xmltv</code><br>
+            <strong>💾 Database:</strong> <code>{{ db_path }}</code>
+        </div>
     </div>
 
-    <script>
-        const serverHost = "{{ server_host }}";
-        const serverPort = "{{ server_port }}";
-
-        function showToast(message, type = "info") {
-            const toast = document.getElementById("toast");
-            const msg = document.getElementById("toastMessage");
-
-            toast.classList.add("toast-" + type);
-            msg.textContent = message;
-            toast.style.display = "flex";
-
-            setTimeout(() => {
-                hideToast();
-            }, 3000);
-        }
-
-        function hideToast() {
-            const toast = document.getElementById("toast");
-            toast.style.display = "none";
-        }
-
-        async function copyPlaylistUrl() {
-            const url = `http://${serverHost}:${serverPort}/playlist.m3u`;
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(url);
-                } else {
-                    // Fallback for older browsers / non-secure contexts
-                    const tempInput = document.createElement("input");
-                    tempInput.style.position = "fixed";
-                    tempInput.style.left = "-1000px";
-                    tempInput.value = url;
-                    document.body.appendChild(tempInput);
-                    tempInput.focus();
-                    tempInput.select();
-                    document.execCommand("copy");
-                    document.body.removeChild(tempInput);
-                }
-                showToast("Playlist URL copied to clipboard", "success");
-            } catch (err) {
-                console.error("Clipboard error:", err);
-                showToast("Failed to copy URL. Right-click and copy manually.", "error");
-            }
-        }
-
-        async function copyXmltvUrl() {
-            const url = `http://${serverHost}:${serverPort}/xmltv`;
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(url);
-                } else {
-                    // Fallback for older browsers / non-secure contexts
-                    const tempInput = document.createElement("input");
-                    tempInput.style.position = "fixed";
-                    tempInput.style.left = "-1000px";
-                    tempInput.value = url;
-                    document.body.appendChild(tempInput);
-                    tempInput.focus();
-                    tempInput.select();
-                    document.execCommand("copy");
-                    document.body.removeChild(tempInput);
-                }
-                showToast("XMLTV URL copied to clipboard", "success");
-            } catch (err) {
-                console.error("Clipboard error:", err);
-                showToast("Failed to copy XMLTV URL. Right-click and copy manually.", "error");
-            }
-        }
-
-        async function regeneratePlaylists() {
-            try {
-                showToast("Regenerating M3U/XMLTV data...", "info");
-                
-                const response = await fetch("/api/regenerate", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    }
-                });
-
-                const data = await response.json();
-                
-                if (!response.ok || !data.success) {
-                    showToast(data.message || "Failed to regenerate playlists", "error");
-                    return;
-                }
-
-                showToast(data.message || "M3U/XMLTV regenerated successfully", "success");
-            } catch (err) {
-                console.error("Regenerate error:", err);
-                showToast("Error regenerating playlists", "error");
-            }
-        }
-
-        function onFiltersChange() {
-            const search = document.getElementById("searchInput").value;
-            const state = document.getElementById("stateSelect").value;
-
-            const params = new URLSearchParams(window.location.search);
-            if (search) {
-                params.set("search", search);
-            } else {
-                params.delete("search");
-            }
-
-            if (state) {
-                params.set("state", state);
-            } else {
-                params.delete("state");
-            }
-
-            const newUrl =
-                window.location.pathname + (params.toString() ? "?" + params.toString() : "");
-            window.location.href = newUrl;
-        }
-
-        async function openVenue(venueId) {
-            window.location.href = "/venue/" + venueId;
-        }
-
-        async function toggleFavorite(surfaceId) {
-            try {
-                const response = await fetch(`/api/favorites/${surfaceId}`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    }
-                });
-
-                const data = await response.json();
-                if (!response.ok || !data.success) {
-                    showToast(data.message || "Failed to update favorite", "error");
-                    return;
-                }
-
-                await refreshFavoritesList();
-                showToast(data.message || "Favorite updated", "success");
-            } catch (err) {
-                console.error("toggleFavorite error:", err);
-                showToast("Error updating favorite. Is the DB locked?", "error");
-            }
-        }
-
-        async function refreshFavoritesList() {
-            try {
-                const response = await fetch("/api/favorites");
-                const data = await response.json();
-
-                const container = document.getElementById("favoritesListContainer");
-                const countLabel = document.getElementById("favoritesCount");
-
-                if (!data.success) {
-                    container.innerHTML = `
-                        <div class="favorites-empty">
-                            <h3>Could not load favorites</h3>
-                            <p>${data.message || "Unknown error."}</p>
-                        </div>
-                    `;
-                    countLabel.textContent = "0 selected";
-                    return;
-                }
-
-                const favorites = data.favorites || [];
-
-                countLabel.textContent =
-                    favorites.length === 1
-                        ? "1 favorite"
-                        : `${favorites.length} favorites`;
-
-                if (!favorites.length) {
-                    container.innerHTML = `
-                        <div class="favorites-empty">
-                            <h3>No favorites yet</h3>
-                            <p>
-                                Browse <strong>Venues & Surfaces</strong> on the right →
-                                Click the <strong>star icon</strong> next to a surface to add it here.
-                            </p>
-                        </div>
-                    `;
-                    return;
-                }
-
-                let html = "";
-                for (const fav of favorites) {
-                    html += `
-                        <div class="favorites-item">
-                            <div class="favorites-leading"></div>
-                            <div class="favorites-main">
-                                <div class="venue-name">
-                                    ${fav.venue_name || "Unknown venue"}
-                                </div>
-                                <div class="surface-name">
-                                    ${fav.surface_name || "Surface"}
-                                </div>
-                                <div class="favorites-meta">
-                                    <span>${fav.city || ""}, ${fav.state || ""}</span>
-                                    <span>Surface ID: ${fav.surface_id}</span>
-                                </div>
-                            </div>
-                            <div class="favorites-actions">
-                                <div class="avatar">★</div>
-                                <button
-                                    class="btn-unfavorite"
-                                    type="button"
-                                    onclick="toggleFavorite(${fav.surface_id}); event.stopPropagation();"
-                                >
-                                    <span class="icon">✕</span>
-                                    Remove
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }
-                container.innerHTML = html;
-            } catch (err) {
-                console.error("refreshFavoritesList error:", err);
-            }
-        }
-
-        async function refreshLogs() {
-            const el = document.getElementById("liveLogs");
-            if (!el) return;
-            try {
-                const response = await fetch("/api/logs");
-                if (!response.ok) {
-                    throw new Error("HTTP " + response.status);
-                }
-                const data = await response.json();
-                const lines = data.lines || [];
-                el.textContent = lines.join("\n");
-                // auto-scroll to bottom
-                el.scrollTop = el.scrollHeight;
-            } catch (err) {
-                console.error("refreshLogs error:", err);
-                el.textContent = "Error loading logs: " + err.message;
-            }
-        }
-
-        function startLogPolling() {
-            refreshLogs();
-            setInterval(refreshLogs, 4000);
-        }
-
-        window.addEventListener("DOMContentLoaded", () => {
-            refreshFavoritesList();
-            const playlistUrlElem = document.getElementById("playlistUrl");
-            if (playlistUrlElem) {
-                playlistUrlElem.textContent = `http://${serverHost}:${serverPort}/playlist.m3u`;
-            }
-            startLogPolling();
-        });
-    </script>
+    <footer>
+        LiveBarn Favorites Manager &copy; 2025
+    </footer>
 </body>
 </html>
 """
@@ -1850,42 +860,40 @@ def list_surfaces_for_venue(venue_id):
         <h1>Surfaces for {venue_dict['name']}</h1>
         <p><a href="/">← Back to all venues</a></p>
         <table border="1" cellpadding="5" cellspacing="0">
-            <tr>
-                <th>Surface Name</th>
-                <th>Stream UUID</th>
-                <th>Favorite?</th>
-                <th>Action</th>
-            </tr>
-            {''.join(rows_html)}
+            <thead>
+                <tr>
+                    <th>Surface Name</th>
+                    <th>UUID</th>
+                    <th>Favorite?</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {"".join(rows_html)}
+            </tbody>
         </table>
     </body>
     </html>
     """
     return table_html
 
-
 @app.route('/toggle_favorite', methods=['POST'])
-def toggle_favorite_route():
-    """Legacy form-based endpoint (still works if you use the old table UI)."""
-    surface_id = request.form.get('surface_id')
-    if not surface_id:
-        return "Missing surface_id", 400
-    
-    try:
-        sid_int = int(surface_id)
-    except ValueError:
-        return "Invalid surface_id", 400
-    
-    try:
-        action = toggle_favorite(sid_int)
-    except sqlite3.OperationalError as e:
-        logger.error(f"Database error during toggle_favorite: {e}")
-        return "Database error (possibly locked). Try again.", 500
-    
-    return f"Favorite toggle action: {action}. <a href=\"/\">Back</a>"
+def toggle_favorite_form():
+    """Form endpoint that redirects back."""
+    surface_id = int(request.form.get('surface_id'))
+    action = toggle_favorite(surface_id)
+    # Redirect to referrer or home
+    return_to = request.referrer or '/'
+    return f"""
+    <html>
+    <head><meta http-equiv="refresh" content="0; url={return_to}"></head>
+    <body>
+        <p>{action.capitalize()} surface #{surface_id}. Redirecting...</p>
+    </body>
+    </html>
+    """
 
-
-@app.route('/api/favorites/<int:surface_id>', methods=['POST'])
+@app.route('/api/toggle_favorite/<int:surface_id>', methods=['POST'])
 def api_toggle_favorite(surface_id):
     """JSON API for toggling favorites."""
     try:
@@ -2048,22 +1056,18 @@ def xmltv_endpoint():
     # Get all favorites
     favorites = get_all_favorites()
     
-    # Use cached schedule data from all providers
+    # Get schedule events from cache
     events_by_surface = SCHEDULE_CACHE.get('events_by_surface', {})
-    last_updated = SCHEDULE_CACHE.get('last_updated')
     
-    # Create root TV element
-    tv = ET.Element('tv')
-    tv.set('generator-info-name', 'LiveBarn Manager + Chiller')
-    tv.set('generator-info-url', f'http://{SERVER_HOST_URL}:{PUBLIC_PORT}')
+    # Build XMLTV
+    root = ET.Element('tv')
+    root.set('generator-info-name', 'LiveBarn Manager')
+    root.set('generator-info-url', 'https://github.com/yourusername/livebarn-manager')
     
-    # Time range for programs
     now = datetime.now()
-    tz_offset = now.astimezone().strftime('%z')
     today_start = datetime.combine(now.date(), dt_time(0, 0))
     tomorrow_end = datetime.combine(now.date() + timedelta(days=2), dt_time(0, 0))
     
-    # Create channels
     for fav in favorites:
         surface_id = fav['surface_id']
         venue_name = fav.get('venue_name', 'Unknown Venue')
@@ -2071,114 +1075,62 @@ def xmltv_endpoint():
         city = fav.get('city', '')
         state = fav.get('state', '')
         
-        title = f"{venue_name} - {surface_name}"
-        if city and state:
-            location_str = f"{city}, {state}"
-        elif city or state:
-            location_str = city or state
-        else:
-            location_str = ""
+        raw_title = f"{venue_name} - {surface_name}"
+        title = sanitize_title_for_filesystem(raw_title)
         
-        channel = ET.SubElement(tv, 'channel')
+        # Channel element
+        channel = ET.SubElement(root, 'channel')
         channel.set('id', str(surface_id))
         
         display_name = ET.SubElement(channel, 'display-name')
-        display_name.text = sanitize_title_for_filesystem(title)
+        display_name.text = title
         
-        if location_str:
-            display_name_loc = ET.SubElement(channel, 'display-name')
-            display_name_loc.text = sanitize_title_for_filesystem(location_str)
-        
-        # Icon
-        icon = ET.SubElement(channel, 'icon')
-        icon.set('src', 'https://www.thechiller.com/assets/images/logo_300.png')
-    
-    # Create programs
-    for fav in favorites:
-        surface_id = fav['surface_id']
-        venue_name = fav.get('venue_name', 'Unknown Venue')
-        surface_name = fav.get('surface_name', 'Surface')
-        city = fav.get('city', '')
-        state = fav.get('state', '')
-        
-        # Get Chiller events for this surface
+        # Get schedule events for this surface
         surface_events = events_by_surface.get(surface_id, [])
         
-        if surface_events:
-            # We have Chiller schedule data - create real programs with Open Ice fillers
-            programs = fill_gaps_with_open_ice(surface_events, today_start, tomorrow_end)
-        else:
-            # No Chiller data - create generic 24-hour live block
-            start_time = now - timedelta(hours=6)
-            end_time = now + timedelta(hours=18)
-            programs = [(start_time, end_time, f"🔴 LIVE: {venue_name} - {surface_name}")]
+        # Fill gaps with "Open Ice" and create programs
+        programs = fill_gaps_with_open_ice(surface_events, today_start, tomorrow_end)
         
-        # Create programme elements
-        for prog_start, prog_end, prog_title in programs:
-            programme = ET.SubElement(tv, 'programme')
+        for start_time, end_time, program_title in programs:
+            programme = ET.SubElement(root, 'programme')
             programme.set('channel', str(surface_id))
-            programme.set('start', prog_start.strftime('%Y%m%d%H%M%S ') + tz_offset)
-            programme.set('stop', prog_end.strftime('%Y%m%d%H%M%S ') + tz_offset)
+            programme.set('start', start_time.strftime('%Y%m%d%H%M%S +0000'))
+            programme.set('stop', end_time.strftime('%Y%m%d%H%M%S +0000'))
             
-            # Program title
             title_elem = ET.SubElement(programme, 'title')
             title_elem.set('lang', 'en')
-            title_elem.text = sanitize_title_for_filesystem(prog_title)
+            title_elem.text = program_title
             
-            # Description
-            desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
-            desc = ET.SubElement(programme, 'desc')
-            desc.set('lang', 'en')
-            desc.text = "\n".join(desc_parts)
+            desc_elem = ET.SubElement(programme, 'desc')
+            desc_elem.set('lang', 'en')
+            if program_title == "Open Ice":
+                desc_elem.text = f"Open practice time at {venue_name} - {surface_name}"
+            else:
+                desc_elem.text = f"{program_title} at {venue_name} - {surface_name}"
             
-            # Category / sub-category (skip for Open Ice placeholders)
-            if "Open Ice" not in prog_title:
-                category = ET.SubElement(programme, 'category')
-                category.set('lang', 'en')
-                category.text = "Sports"
-                
-                sub_category = ET.SubElement(programme, 'category')
-                sub_category.set('lang', 'en')
-                sub_category.text = "Ice Hockey"
-                
-                provider_category = ET.SubElement(programme, 'category')
-                provider_category.set('lang', 'en')
-                provider_category.text = "Livebarn"
-                
-                # Live flag
-                ET.SubElement(programme, 'live')
+            category = ET.SubElement(programme, 'category')
+            category.set('lang', 'en')
+            category.text = 'Sports'
     
-    # Convert to string with proper XML declaration
-    xml_string = ET.tostring(tv, encoding='unicode')
-    xml_output = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    xml_output += '<!DOCTYPE tv SYSTEM "xmltv.dtd">\n'
-    xml_output += xml_string
-    
-    return Response(
-        xml_output,
-        mimetype='application/xml',
-        headers={
-            'Content-Type': 'application/xml; charset=utf-8'
-        }
-    )
-
-
-
+    # Convert to string
+    xml_str = ET.tostring(root, encoding='utf-8', method='xml')
+    return Response(xml_str, mimetype='application/xml')
 
 
 @app.route('/proxy/<int:surface_id>')
 def proxy_stream(surface_id):
     """
-    Streamlink proxy with automatic token refresh.
-    If stream URL is expired/old, auto-refreshes it before streaming.
+    Proxy the HLS stream for a given surface using streamlink
+    Auto-refreshes expired tokens
     """
+    # Get stream info
     stream_info = get_stream_info(surface_id)
     
-    # Check if we need to refresh the token
+    # Check if we need to refresh
     needs_refresh = False
     
     if not stream_info or not stream_info.get('playlist_url'):
-        logger.warning(f"❌ No stream found for surface_id={surface_id}, will try to capture")
+        logger.info(f"⚠️  No stream URL found for surface_id={surface_id}, needs refresh")
         needs_refresh = True
     else:
         # Check if URL has hdnts token with expiry
@@ -2333,7 +1285,8 @@ def init_db_if_needed():
     'venues', 'surfaces', 'favorites', and 'surface_streams'.
     """
     if not DB_PATH.exists():
-        logger.warning(f"Database file does not exist at: {DB_PATH}")
+        logger.warning(f"⚠️  Database file does not exist at: {DB_PATH}")
+        logger.warning(f"⚠️  Please run build_catalog.py first to create the database")
         return
     
     conn = sqlite3.connect(DB_PATH)
@@ -2352,9 +1305,15 @@ def init_db_if_needed():
             missing.append(t)
     
     if missing:
-        logger.warning(f"The following required tables are missing: {missing}")
+        logger.warning(f"⚠️  The following required tables are missing: {missing}")
+        logger.warning(f"⚠️  Please run build_catalog.py to create missing tables")
     else:
-        logger.info("All expected tables found in database.")
+        logger.info("✅ All expected tables found in database")
+        
+        # Check favorites count
+        c.execute('SELECT COUNT(*) FROM favorites')
+        fav_count = c.fetchone()[0]
+        logger.info(f"📊 Current favorites count: {fav_count}")
     
     conn.close()
 
@@ -2408,4 +1367,3 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error(f"Server crashed: {e}")
         scheduler.shutdown()
-

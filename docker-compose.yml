@@ -25,11 +25,14 @@ services:
       # Internal port the Flask app listens on (matches Dockerfile healthcheck)
       - SERVER_PORT=5000
 
+      # Database path (must match volume mount)
+      - DB_PATH=/data/livebarn.db
+
       - TZ=America/New_York  # Set your timezone for correct scheduling
       - LOG_LEVEL=INFO
 
     volumes:
-      # Persistent database storage
+      # Persistent database storage - bind mount to host directory
       - ./data:/data
 
     # Use host network mode for better LAN IP detection (optional)
@@ -38,6 +41,5 @@ services:
 
     # If using host network mode, comment out the ports section above
 
-volumes:
-  data:
-    driver: local
+# Note: No named volumes section needed when using bind mounts
+# The ./data directory will be created on your host and persist across container restarts
