@@ -2153,18 +2153,16 @@ def xmltv_endpoint():
             
             # Description
             if is_generic_block:
-                # For generic blocks: show time range + rink name
-                start_str = prog_start.strftime('%I:%M %p').lstrip('0')
-                end_str = prog_end.strftime('%I:%M %p').lstrip('0')
-                time_range = f"{start_str} - {end_str}"
-                desc_parts = [time_range, f"{venue_name} - {surface_name}"]
+                # For generic blocks: just show rink name (time is in the programme start/stop)
+                desc_text = f"{venue_name} - {surface_name}"
             else:
                 # For real events: show event name + rink name
                 desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
+                desc_text = "\n".join(desc_parts)
             
             desc = ET.SubElement(programme, 'desc')
             desc.set('lang', 'en')
-            desc.text = "\n".join(desc_parts)
+            desc.text = desc_text
             
             # Category / sub-category (skip for Open Ice placeholders AND generic blocks)
             if "Open Ice" not in prog_title and not is_generic_block:
