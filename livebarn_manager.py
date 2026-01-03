@@ -172,7 +172,7 @@ def refresh_schedule():
         
         now = datetime.now()
         today_start = datetime.combine(now.date(), dt_time(0, 0))
-        tomorrow_end = datetime.combine(now.date() + timedelta(days=2), dt_time(0, 0))
+        tomorrow_end = datetime.combine(now.date() + timedelta(days=7), dt_time(0, 0))
         
         # Collect all events from all providers
         all_events = []
@@ -2067,7 +2067,7 @@ def xmltv_endpoint():
     now = datetime.now()
     tz_offset = now.astimezone().strftime('%z')
     today_start = datetime.combine(now.date(), dt_time(0, 0))
-    tomorrow_end = datetime.combine(now.date() + timedelta(days=2), dt_time(0, 0))
+    tomorrow_end = datetime.combine(now.date() + timedelta(days=7), dt_time(0, 0))
     
     # Create channels
     for fav in favorites:
