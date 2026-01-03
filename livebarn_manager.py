@@ -109,7 +109,7 @@ print(f"DEBUG: LAN_IP bool = {bool(LAN_IP)}")  # Debug print
 
 if LAN_IP:
     SERVER_HOST_URL = LAN_IP
-    logger.info(f"✅ Using configured LAN_IP: {LAN_IP}")
+    logger.info(f" Using configured LAN_IP: {LAN_IP}")
     print(f"DEBUG: Set SERVER_HOST_URL to {SERVER_HOST_URL}")
 else:
     # Import get_lan_ip here to avoid forward reference
@@ -126,7 +126,7 @@ else:
         return ip
     
     SERVER_HOST_URL = _get_lan_ip()
-    logger.info(f"⚠️  Auto-detected IP: {SERVER_HOST_URL}")
+    logger.info(f"  Auto-detected IP: {SERVER_HOST_URL}")
     print(f"DEBUG: Auto-detected SERVER_HOST_URL = {SERVER_HOST_URL}")
 
 # --- Database Configuration ---
@@ -135,7 +135,7 @@ DB_PATH = Path(os.getenv('DB_PATH', '/data/livebarn.db'))
 # CRITICAL FIX: Ensure the database directory exists
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 logger.info(f"📁 Database directory: {DB_PATH.parent}")
-logger.info(f"💾 Database file: {DB_PATH}")
+logger.info(f" Database file: {DB_PATH}")
 
 # Keep this fairly short so UI errors out quickly instead of appearing frozen on locks
 SQLITE_TIMEOUT = 3
@@ -160,6 +160,29 @@ def get_lan_ip():
     return ip
 
 
+def create_hourly_live_blocks(start: datetime, end: datetime, venue_name: str, surface_name: str) -> List[Tuple[datetime, datetime, str]]:
+    """
+    Create 1-hour LIVE blocks for rinks without schedule data
+    Makes the guide easier to navigate than one giant 24-hour block
+    """
+    programs: List[Tuple[datetime, datetime, str]] = []
+    current_time = start
+    
+    while current_time < end:
+        block_end = min(current_time + timedelta(hours=1), end)
+        
+        # Format: "LIVE: 3:00 PM - 4:00 PM" (cross-platform compatible)
+        start_str = current_time.strftime('%I:%M %p').lstrip('0')
+        end_str = block_end.strftime('%I:%M %p').lstrip('0')
+        time_range = f"{start_str} - {end_str}"
+        title = f"LIVE: {time_range}"
+        
+        programs.append((current_time, block_end, title))
+        current_time = block_end
+    
+    return programs
+
+
 def refresh_schedule():
     """
     Background job to refresh schedule data from all providers
@@ -168,7 +191,7 @@ def refresh_schedule():
     global SCHEDULE_CACHE
     
     try:
-        logger.info("🔄 Refreshing schedules from all providers...")
+        logger.info(" Refreshing schedules from all providers...")
         
         now = datetime.now()
         today_start = datetime.combine(now.date(), dt_time(0, 0))
@@ -180,16 +203,16 @@ def refresh_schedule():
         
         for provider in ALL_PROVIDERS:
             if not provider.is_enabled():
-                logger.info(f"⏭️  Skipping {provider.name} (disabled)")
+                logger.info(f"  Skipping {provider.name} (disabled)")
                 continue
             
             try:
                 events = provider.fetch_schedule(today_start, tomorrow_end)
                 all_events.extend(events)
                 provider_stats.append(f"{len(events)} {provider.name}")
-                logger.info(f"✅ {provider.name}: {len(events)} events")
+                logger.info(f" {provider.name}: {len(events)} events")
             except Exception as e:
-                logger.error(f"❌ {provider.name} failed: {e}")
+                logger.error(f" {provider.name} failed: {e}")
         
         # Group events by surface using utility function
         events_by_surface = group_events_by_surface(all_events)
@@ -200,10 +223,10 @@ def refresh_schedule():
         
         total_events = len(all_events)
         stats_str = " + ".join(provider_stats) if provider_stats else "0"
-        logger.info(f"✅ Schedule refreshed: {stats_str} = {total_events} total events")
+        logger.info(f" Schedule refreshed: {stats_str} = {total_events} total events")
         
     except Exception as e:
-        logger.error(f"❌ Failed to refresh schedules: {e}")
+        logger.error(f" Failed to refresh schedules: {e}")
 
 
 # --- HTML Template (Embedded) ---
@@ -1114,7 +1137,7 @@ HTML_TEMPLATE = r"""
                     <div class="favorites-caption" id="favoritesCount">0 selected</div>
                 </div>
                 <button class="favorites-count-pill" onclick="refreshFavoritesList()" title="Refresh favorites">
-                    🔄 Refresh
+                     Refresh
                 </button>
             </div>
 
@@ -1129,7 +1152,7 @@ HTML_TEMPLATE = r"""
                         <code id="playlistUrl">Loading...</code>
                     </div>
                     <button class="btn-copy" onclick="copyPlaylistUrl()" title="Copy to clipboard">
-                        <span class="icon">📋</span>
+                        <span class="icon"></span>
                         Copy
                     </button>
                 </div>
@@ -1149,7 +1172,7 @@ HTML_TEMPLATE = r"""
                         <code>http://{{ server_host }}:{{ server_port }}/xmltv</code>
                     </div>
                     <button class="btn-copy" onclick="copyXmltvUrl()" title="Copy to clipboard">
-                        <span class="icon">📋</span>
+                        <span class="icon"></span>
                         Copy
                     </button>
                 </div>
@@ -1161,7 +1184,7 @@ HTML_TEMPLATE = r"""
             <!-- Regenerate Button -->
             <div style="margin-bottom: 12px;">
                 <button class="btn-regenerate" onclick="regeneratePlaylists()" title="Refresh M3U and XMLTV data">
-                    <span class="icon">🔄</span>
+                    <span class="icon"></span>
                     Regenerate M3U/XMLTV
                 </button>
             </div>
@@ -1964,7 +1987,7 @@ def api_regenerate_playlists():
     """
     try:
         logger.info("=" * 70)
-        logger.info("🔄 MANUAL REGENERATION TRIGGERED VIA API")
+        logger.info(" MANUAL REGENERATION TRIGGERED VIA API")
         logger.info("=" * 70)
         
         # Force refresh the schedule cache
@@ -1977,8 +2000,8 @@ def api_regenerate_playlists():
         total_surfaces = len(events_by_surface)
         total_events = sum(len(events) for events in events_by_surface.values())
         
-        logger.info(f"📊 Cache updated: {total_surfaces} surfaces, {total_events} events")
-        logger.info(f"⏰ Last updated: {last_updated}")
+        logger.info(f" Cache updated: {total_surfaces} surfaces, {total_events} events")
+        logger.info(f" Last updated: {last_updated}")
         logger.info("=" * 70)
         
         return jsonify({
@@ -1986,7 +2009,7 @@ def api_regenerate_playlists():
             "message": f"M3U/XMLTV refreshed: {total_surfaces} surfaces, {total_events} events"
         })
     except Exception as e:
-        logger.error(f"❌ Error during manual regeneration: {e}", exc_info=True)
+        logger.error(f" Error during manual regeneration: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "message": f"Error refreshing data: {str(e)}"
@@ -2016,7 +2039,7 @@ def generate_playlist():
             location = ""
         
         # Build guide description
-        description = f"🎥 Live camera feed from {venue_name} - {surface_name}"
+        description = f" Live camera feed from {venue_name} - {surface_name}"
         if city and state:
             description += f" in {city}, {state}"
         
@@ -2114,10 +2137,8 @@ def xmltv_endpoint():
             # We have Chiller schedule data - create real programs with Open Ice fillers
             programs = fill_gaps_with_open_ice(surface_events, today_start, tomorrow_end)
         else:
-            # No Chiller data - create generic 24-hour live block
-            start_time = now - timedelta(hours=6)
-            end_time = now + timedelta(hours=18)
-            programs = [(start_time, end_time, f"🔴 LIVE: {venue_name} - {surface_name}")]
+            # No schedule data - create 1-hour LIVE blocks for easier navigation
+            programs = create_hourly_live_blocks(today_start, tomorrow_end, venue_name, surface_name)
         
         # Create programme elements
         for prog_start, prog_end, prog_title in programs:
@@ -2184,7 +2205,7 @@ def proxy_stream(surface_id):
     needs_refresh = False
     
     if not stream_info or not stream_info.get('playlist_url'):
-        logger.warning(f"❌ No stream found for surface_id={surface_id}, will try to capture")
+        logger.warning(f" No stream found for surface_id={surface_id}, will try to capture")
         needs_refresh = True
     else:
         # Check if URL has hdnts token with expiry
@@ -2203,14 +2224,14 @@ def proxy_stream(surface_id):
             minutes_left = (exp_datetime - now).total_seconds() / 60
             
             if minutes_left < 5:
-                logger.info(f"🔄 Token expiring in {minutes_left:.1f} minutes, auto-refreshing...")
+                logger.info(f" Token expiring in {minutes_left:.1f} minutes, auto-refreshing...")
                 needs_refresh = True
             else:
-                logger.info(f"✅ Token valid for {minutes_left:.0f} more minutes")
+                logger.info(f" Token valid for {minutes_left:.0f} more minutes")
     
     # Auto-refresh if needed
     if needs_refresh:
-        logger.info(f"🔄 Auto-refreshing stream for surface_id={surface_id}...")
+        logger.info(f" Auto-refreshing stream for surface_id={surface_id}...")
         
         # Quick refresh using browser automation
         import subprocess as sp
@@ -2225,18 +2246,18 @@ def proxy_stream(surface_id):
             )
             
             if result.returncode == 0:
-                logger.info(f"✅ Auto-refresh succeeded!")
+                logger.info(f" Auto-refresh succeeded!")
                 # Re-fetch stream info
                 stream_info = get_stream_info(surface_id)
             else:
-                logger.error(f"❌ Auto-refresh failed: {result.stderr}")
+                logger.error(f" Auto-refresh failed: {result.stderr}")
                 return f"Auto-refresh failed for surface_id={surface_id}", 500
                 
         except sp.TimeoutExpired:
-            logger.error(f"❌ Auto-refresh timeout")
+            logger.error(f" Auto-refresh timeout")
             return f"Auto-refresh timeout for surface_id={surface_id}", 500
         except Exception as e:
-            logger.error(f"❌ Auto-refresh error: {e}")
+            logger.error(f" Auto-refresh error: {e}")
             return f"Auto-refresh error: {e}", 500
     
     if not stream_info or not stream_info.get('playlist_url'):
@@ -2247,12 +2268,12 @@ def proxy_stream(surface_id):
     surface_name = stream_info.get('surface_name', 'Unknown')
     stream_name = f"{venue_name} - {surface_name}"
     
-    logger.info(f"📺 Streaming surface_id={surface_id}: {stream_name}")
+    logger.info(f" Streaming surface_id={surface_id}: {stream_name}")
     logger.info(f"   URL: {playlist_url[:80]}...")
     
     def generate():
         """Generator with pre-buffering to prevent VLC 'end of stream' error"""
-        logger.info(f"   🚀 Launching streamlink subprocess")
+        logger.info(f"    Launching streamlink subprocess")
         
         process = subprocess.Popen(
             [
@@ -2268,7 +2289,7 @@ def proxy_stream(surface_id):
         )
         
         # PRE-BUFFER: Wait for first chunk before yielding
-        logger.info(f"   ⏳ Waiting for first video chunk...")
+        logger.info(f"    Waiting for first video chunk...")
         start_time = time.time()
         first_chunk = None
         
@@ -2277,12 +2298,12 @@ def proxy_stream(surface_id):
             if chunk:
                 first_chunk = chunk
                 elapsed = time.time() - start_time
-                logger.info(f"   ✅ Got first chunk after {elapsed:.1f}s ({len(chunk)} bytes)")
+                logger.info(f"    Got first chunk after {elapsed:.1f}s ({len(chunk)} bytes)")
                 break
             time.sleep(0.05)
         
         if not first_chunk:
-            logger.error(f"   ❌ No data from streamlink after 30 seconds")
+            logger.error(f"    No data from streamlink after 30 seconds")
             stderr = process.stderr.read().decode('utf-8', errors='ignore')
             if stderr:
                 logger.error(f"   Streamlink error: {stderr}")
@@ -2299,23 +2320,23 @@ def proxy_stream(surface_id):
             while True:
                 chunk = process.stdout.read(8192)
                 if not chunk:
-                    logger.info(f"   ✓ Stream ended after {chunk_count} chunks")
+                    logger.info(f"    Stream ended after {chunk_count} chunks")
                     break
                 chunk_count += 1
                 if chunk_count % 1000 == 0:  # Log every 1000 chunks (~8MB)
-                    logger.info(f"   📊 Streamed {chunk_count} chunks so far...")
+                    logger.info(f"    Streamed {chunk_count} chunks so far...")
                 yield chunk
         except GeneratorExit:
-            logger.info(f"   ⚠️  Client disconnected after {chunk_count} chunks")
+            logger.info(f"     Client disconnected after {chunk_count} chunks")
         except Exception as e:
-            logger.error(f"   ❌ Streaming error: {e}")
+            logger.error(f"    Streaming error: {e}")
         finally:
-            logger.info(f"   🛑 Terminating streamlink (streamed {chunk_count} chunks total)")
+            logger.info(f"    Terminating streamlink (streamed {chunk_count} chunks total)")
             process.terminate()
             try:
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                logger.warning(f"   ⚠️  Had to kill streamlink process")
+                logger.warning(f"     Had to kill streamlink process")
                 process.kill()
     
     return Response(
@@ -2339,8 +2360,8 @@ def init_db_if_needed():
     'venues', 'surfaces', 'favorites', and 'surface_streams'.
     """
     if not DB_PATH.exists():
-        logger.warning(f"⚠️  Database file does not exist at: {DB_PATH}")
-        logger.warning(f"⚠️  Please run build_catalog.py first to create the database")
+        logger.warning(f"  Database file does not exist at: {DB_PATH}")
+        logger.warning(f"  Please run build_catalog.py first to create the database")
         return
     
     conn = sqlite3.connect(DB_PATH)
@@ -2359,15 +2380,15 @@ def init_db_if_needed():
             missing.append(t)
     
     if missing:
-        logger.warning(f"⚠️  The following required tables are missing: {missing}")
-        logger.warning(f"⚠️  Please run build_catalog.py to create missing tables")
+        logger.warning(f"  The following required tables are missing: {missing}")
+        logger.warning(f"  Please run build_catalog.py to create missing tables")
     else:
-        logger.info("✅ All expected tables found in database")
+        logger.info(" All expected tables found in database")
         
         # Check favorites count
         c.execute('SELECT COUNT(*) FROM favorites')
         fav_count = c.fetchone()[0]
-        logger.info(f"📊 Current favorites count: {fav_count}")
+        logger.info(f" Current favorites count: {fav_count}")
     
     conn.close()
 
@@ -2402,13 +2423,13 @@ if __name__ == '__main__':
     )
     
     scheduler.start()
-    logger.info("⏰ Scheduler started - Schedule refresh at 3:00 AM daily")
+    logger.info(" Scheduler started - Schedule refresh at 3:00 AM daily")
     
     # Do initial schedule refresh on startup
-    logger.info("🔄 Performing initial schedule refresh...")
+    logger.info(" Performing initial schedule refresh...")
     refresh_schedule()
     
-    print("\n✅ Background scheduler active")
+    print("\n Background scheduler active")
     print("   → Schedule refreshes daily at 3:00 AM")
     print("\nPress Ctrl+C to stop the server.")
     
