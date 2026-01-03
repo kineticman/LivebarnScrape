@@ -162,21 +162,17 @@ def get_lan_ip():
 
 def create_hourly_live_blocks(start: datetime, end: datetime, venue_name: str, surface_name: str) -> List[Tuple[datetime, datetime, str]]:
     """
-    Create 1-hour LIVE blocks for rinks without schedule data
-    Makes the guide easier to navigate than one giant 24-hour block
+    Create 1-hour blocks for rinks without schedule data
+    Uses rink name as title for cleaner guide appearance
     """
     programs: List[Tuple[datetime, datetime, str]] = []
     current_time = start
     
+    # Title is just the rink name
+    title = f"{venue_name} - {surface_name}"
+    
     while current_time < end:
         block_end = min(current_time + timedelta(hours=1), end)
-        
-        # Format: "LIVE: 3:00 PM - 4:00 PM" (cross-platform compatible)
-        start_str = current_time.strftime('%I:%M %p').lstrip('0')
-        end_str = block_end.strftime('%I:%M %p').lstrip('0')
-        time_range = f"{start_str} - {end_str}"
-        title = f"LIVE: {time_range}"
-        
         programs.append((current_time, block_end, title))
         current_time = block_end
     
@@ -2152,14 +2148,26 @@ def xmltv_endpoint():
             title_elem.set('lang', 'en')
             title_elem.text = sanitize_title_for_filesystem(prog_title)
             
+            # Check if this is a generic hourly block (title == venue - surface)
+            is_generic_block = prog_title == f"{venue_name} - {surface_name}"
+            
             # Description
-            desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
+            if is_generic_block:
+                # For generic blocks: show time range + rink name
+                start_str = prog_start.strftime('%I:%M %p').lstrip('0')
+                end_str = prog_end.strftime('%I:%M %p').lstrip('0')
+                time_range = f"{start_str} - {end_str}"
+                desc_parts = [time_range, f"{venue_name} - {surface_name}"]
+            else:
+                # For real events: show event name + rink name
+                desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
+            
             desc = ET.SubElement(programme, 'desc')
             desc.set('lang', 'en')
             desc.text = "\n".join(desc_parts)
             
-            # Category / sub-category (skip for Open Ice placeholders)
-            if "Open Ice" not in prog_title:
+            # Category / sub-category (skip for Open Ice placeholders AND generic blocks)
+            if "Open Ice" not in prog_title and not is_generic_block:
                 category = ET.SubElement(programme, 'category')
                 category.set('lang', 'en')
                 category.text = "Sports"
