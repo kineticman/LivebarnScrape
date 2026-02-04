@@ -13,6 +13,8 @@ import time
 import os
 import re
 import requests
+import signal
+import atexit
 from datetime import datetime, timedelta, time as dt_time
 from collections import deque
 from typing import List, Dict, Tuple, Optional
@@ -223,6 +225,43 @@ def refresh_schedule():
         
     except Exception as e:
         logger.error(f" Failed to refresh schedules: {e}")
+
+
+def checkpoint_database():
+    """
+    Force WAL checkpoint on shutdown to ensure all data is written to main database file.
+    This is critical for Docker containers where shutdown may be abrupt.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        # TRUNCATE mode: checkpoint and remove WAL file
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        logger.info("✅ Database checkpointed successfully on shutdown")
+    except Exception as e:
+        logger.error(f"❌ Error checkpointing database on shutdown: {e}")
+
+
+def graceful_shutdown(signum, frame):
+    """
+    Handle shutdown signals (SIGTERM from Docker, SIGINT from Ctrl+C).
+    Ensures database is properly saved before exit.
+    """
+    logger.info(f"🛑 Received shutdown signal ({signum}), shutting down gracefully...")
+    
+    # Checkpoint database first
+    checkpoint_database()
+    
+    # Shutdown scheduler if running
+    try:
+        if 'scheduler' in globals() and scheduler.running:
+            logger.info("⏸️  Shutting down scheduler...")
+            scheduler.shutdown(wait=False)
+    except Exception as e:
+        logger.error(f"Error shutting down scheduler: {e}")
+    
+    logger.info("👋 Shutdown complete")
+    sys.exit(0)
 
 
 # --- HTML Template (Embedded) ---
@@ -1600,6 +1639,11 @@ def get_db():
             # Match the Python-level timeout
             cur.execute(f"PRAGMA busy_timeout={int(SQLITE_TIMEOUT * 1000)};")
             cur.execute("PRAGMA foreign_keys=ON;")
+            
+            # PERSISTENCE FIX: More aggressive WAL checkpointing
+            # Default is 1000 pages, which may not trigger in short Docker sessions
+            cur.execute("PRAGMA wal_autocheckpoint=100;")  # Checkpoint every 100 pages
+            cur.execute("PRAGMA synchronous=NORMAL;")  # Balance safety and performance
         finally:
             cur.close()
 
@@ -2400,6 +2444,14 @@ def init_db_if_needed():
 
 
 if __name__ == '__main__':
+    # Register shutdown handlers FIRST to ensure database is saved
+    # These handle Docker stop (SIGTERM) and Ctrl+C (SIGINT)
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    
+    # Also register atexit handler as fallback for normal exit
+    atexit.register(checkpoint_database)
+    
     init_db_if_needed()
     
     print("=" * 70)
@@ -2445,7 +2497,9 @@ if __name__ == '__main__':
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down scheduler...")
         scheduler.shutdown()
+        # graceful_shutdown will handle the rest
     except Exception as e:
         logger.error(f"Server crashed: {e}")
         scheduler.shutdown()
+        checkpoint_database()  # Save on crash too
 
