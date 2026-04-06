@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo
 
 from .base_provider import ScheduleProvider, ScheduleEvent
 
@@ -35,6 +36,7 @@ class ChillerProvider(ScheduleProvider):
     
     # Ice sheet product IDs (skip rooms/gyms)
     ICE_SHEET_PRODUCT_IDS = {"1", "2", "5", "6", "8", "9", "13", "14", "16", "24"}
+    TIMEZONE = ZoneInfo("America/New_York")
     
     @property
     def name(self) -> str:
@@ -47,8 +49,9 @@ class ChillerProvider(ScheduleProvider):
     def fetch_schedule(self, start_date: datetime, end_date: datetime) -> List[ScheduleEvent]:
         """Fetch schedule from Chiller XML API"""
         try:
+            timeshift_minutes = self._get_timeshift_minutes(start_date)
             params = {
-                "timeshift": "300",  # Eastern (UTC-5)
+                "timeshift": str(timeshift_minutes),
                 "uid": "1",
                 "from": start_date.strftime("%Y-%m-%d"),
                 "to": end_date.strftime("%Y-%m-%d"),
@@ -102,6 +105,18 @@ class ChillerProvider(ScheduleProvider):
         except Exception as e:
             logger.error(f"⚠️  Failed to fetch {self.name} schedule: {e}")
             return []
+
+    def _get_timeshift_minutes(self, reference_date: datetime) -> int:
+        """Return EST/EDT offset in the format expected by the Chiller API."""
+        if reference_date.tzinfo is None:
+            reference_date = reference_date.replace(tzinfo=self.TIMEZONE)
+        else:
+            reference_date = reference_date.astimezone(self.TIMEZONE)
+
+        offset = reference_date.utcoffset()
+        if offset is None:
+            return 300
+        return int(abs(offset.total_seconds()) // 60)
     
     def _parse_datetime(self, dt_str: str) -> Optional[datetime]:
         """Parse Chiller datetime string: '2025-12-02 09:30:00.0'"""

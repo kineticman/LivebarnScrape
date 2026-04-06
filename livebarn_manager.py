@@ -15,6 +15,7 @@ import re
 import requests
 import signal
 import atexit
+import threading
 from datetime import datetime, timedelta, time as dt_time
 from collections import deque
 from typing import List, Dict, Tuple, Optional
@@ -106,13 +107,10 @@ logging.getLogger().setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 
 # LAN IP Configuration - Use env var if set, otherwise auto-detect  
 LAN_IP = os.getenv('LAN_IP')
-print(f"DEBUG: LAN_IP from env = '{LAN_IP}'")  # Debug print
-print(f"DEBUG: LAN_IP bool = {bool(LAN_IP)}")  # Debug print
 
 if LAN_IP:
     SERVER_HOST_URL = LAN_IP
     logger.info(f" Using configured LAN_IP: {LAN_IP}")
-    print(f"DEBUG: Set SERVER_HOST_URL to {SERVER_HOST_URL}")
 else:
     # Import get_lan_ip here to avoid forward reference
     def _get_lan_ip():
@@ -129,7 +127,6 @@ else:
     
     SERVER_HOST_URL = _get_lan_ip()
     logger.info(f"  Auto-detected IP: {SERVER_HOST_URL}")
-    print(f"DEBUG: Auto-detected SERVER_HOST_URL = {SERVER_HOST_URL}")
 
 # --- Database Configuration ---
 DB_PATH = Path(os.getenv('DB_PATH', '/data/livebarn.db'))
@@ -147,6 +144,9 @@ SCHEDULE_CACHE = {
     'events_by_surface': {},
     'last_updated': None
 }
+
+STREAM_REFRESH_LOCKS: Dict[int, threading.Lock] = {}
+STREAM_REFRESH_LOCKS_GUARD = threading.Lock()
 
 def get_lan_ip():
     """Get the local non-loopback IP address."""
@@ -1852,6 +1852,37 @@ def get_stream_info(surface_id):
         }
     return None
 
+
+def get_stream_refresh_lock(surface_id: int) -> threading.Lock:
+    """Return a stable lock object for a given surface."""
+    with STREAM_REFRESH_LOCKS_GUARD:
+        lock = STREAM_REFRESH_LOCKS.get(surface_id)
+        if lock is None:
+            lock = threading.Lock()
+            STREAM_REFRESH_LOCKS[surface_id] = lock
+        return lock
+
+
+def stream_needs_refresh(stream_info: Optional[Dict[str, str]]) -> bool:
+    """Determine whether the cached playlist URL is missing or near expiry."""
+    if not stream_info or not stream_info.get('playlist_url'):
+        return True
+
+    match = re.search(r'exp=(\d+)', stream_info['playlist_url'])
+    if not match:
+        return False
+
+    exp_timestamp = int(match.group(1))
+    exp_datetime = datetime.fromtimestamp(exp_timestamp)
+    minutes_left = (exp_datetime - datetime.now()).total_seconds() / 60
+
+    if minutes_left < 5:
+        logger.info(f" Token expiring in {minutes_left:.1f} minutes, auto-refreshing...")
+        return True
+
+    logger.info(f" Token valid for {minutes_left:.0f} more minutes")
+    return False
+
 # --- Flask Routes ---
 
 @app.route('/')
@@ -2097,9 +2128,8 @@ def generate_playlist():
             f'tvc-guide-description="{description}" '
             f'tvc-guide-tags="Live, HDTV" '
             f'tvc-guide-genres="Sports" '
-            f'tvc-guide-placeholders="3600",'  # 1 hour blocks
-            f'{title}{location}'
-        )
+            f'tvc-guide-placeholders="3600",'
+        ) + f'{title}{location}'
         
         lines.append(extinf_line)
         lines.append(proxy_url)
@@ -2252,63 +2282,48 @@ def proxy_stream(surface_id):
     stream_info = get_stream_info(surface_id)
     
     # Check if we need to refresh the token
-    needs_refresh = False
-    
-    if not stream_info or not stream_info.get('playlist_url'):
+    needs_refresh = stream_needs_refresh(stream_info)
+
+    if needs_refresh and (not stream_info or not stream_info.get('playlist_url')):
         logger.warning(f" No stream found for surface_id={surface_id}, will try to capture")
-        needs_refresh = True
-    else:
-        # Check if URL has hdnts token with expiry
-        playlist_url = stream_info['playlist_url']
-        
-        # Parse expiry from hdnts token
-        import re
-        match = re.search(r'exp=(\d+)', playlist_url)
-        if match:
-            exp_timestamp = int(match.group(1))
-            from datetime import datetime
-            exp_datetime = datetime.fromtimestamp(exp_timestamp)
-            now = datetime.now()
-            
-            # Refresh if expired or expiring soon (within 5 minutes)
-            minutes_left = (exp_datetime - now).total_seconds() / 60
-            
-            if minutes_left < 5:
-                logger.info(f" Token expiring in {minutes_left:.1f} minutes, auto-refreshing...")
-                needs_refresh = True
-            else:
-                logger.info(f" Token valid for {minutes_left:.0f} more minutes")
     
     # Auto-refresh if needed
     if needs_refresh:
         logger.info(f" Auto-refreshing stream for surface_id={surface_id}...")
-        
-        # Quick refresh using browser automation
+
+        refresh_lock = get_stream_refresh_lock(surface_id)
+        if not refresh_lock.acquire(timeout=90):
+            logger.error(f" Timed out waiting for refresh lock for surface_id={surface_id}")
+            return f"Refresh lock timeout for surface_id={surface_id}", 503
+
         import subprocess as sp
         try:
-            # Run a quick single-stream refresh
-            result = sp.run(
-                ['python', 'refresh_single.py', str(surface_id)],
-                capture_output=True,
-                text=True,
-                timeout=45,  # Increased from 30 to 45 seconds
-                cwd=str(Path(__file__).parent)
-            )
-            
-            if result.returncode == 0:
-                logger.info(f" Auto-refresh succeeded!")
-                # Re-fetch stream info
-                stream_info = get_stream_info(surface_id)
-            else:
-                logger.error(f" Auto-refresh failed: {result.stderr}")
-                return f"Auto-refresh failed for surface_id={surface_id}", 500
+            stream_info = get_stream_info(surface_id)
+            if stream_needs_refresh(stream_info):
+                result = sp.run(
+                    [sys.executable, 'refresh_single.py', str(surface_id)],
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                    cwd=str(Path(__file__).parent)
+                )
                 
+                if result.returncode == 0:
+                    logger.info(" Auto-refresh succeeded!")
+                    stream_info = get_stream_info(surface_id)
+                else:
+                    logger.error(f" Auto-refresh failed: {result.stderr}")
+                    return f"Auto-refresh failed for surface_id={surface_id}", 500
+            else:
+                logger.info(f" Refresh skipped for surface_id={surface_id}; another request already updated it")
         except sp.TimeoutExpired:
-            logger.error(f" Auto-refresh timeout")
+            logger.error(" Auto-refresh timeout")
             return f"Auto-refresh timeout for surface_id={surface_id}", 500
         except Exception as e:
             logger.error(f" Auto-refresh error: {e}")
             return f"Auto-refresh error: {e}", 500
+        finally:
+            refresh_lock.release()
     
     if not stream_info or not stream_info.get('playlist_url'):
         return f"No stream found for surface_id={surface_id} even after refresh", 404
@@ -2502,4 +2517,3 @@ if __name__ == '__main__':
         logger.error(f"Server crashed: {e}")
         scheduler.shutdown()
         checkpoint_database()  # Save on crash too
-
