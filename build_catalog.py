@@ -80,6 +80,7 @@ def build_catalog():
             surface_id INTEGER UNIQUE,
             added_at TEXT,
             notes TEXT,
+            preferred_feed_mode TEXT NOT NULL DEFAULT 'default',
             FOREIGN KEY (surface_id) REFERENCES surfaces(id)
         )
     ''')
@@ -96,6 +97,8 @@ def build_catalog():
             playlist_url TEXT,
             full_captured_url TEXT,
             captured_at TEXT,
+            feed_mode TEXT,
+            feed_mode_id INTEGER,
             FOREIGN KEY (surface_id) REFERENCES surfaces(id)
         )
     ''')

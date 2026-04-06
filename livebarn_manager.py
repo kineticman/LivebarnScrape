@@ -31,6 +31,16 @@ from schedule_utils import group_events_by_surface, fill_gaps_with_open_ice
 
 
 INVALID_FS_CHARS = set('\\/:*?"<>|')
+FEED_MODE_IDS = {
+    'pano': 4,
+    'auto': 5,
+}
+FEED_MODE_LABELS = {
+    'default': 'Default',
+    'pano': 'Pano',
+    'auto': 'Auto',
+    'both': 'Both',
+}
 
 def sanitize_title_for_filesystem(text: str) -> str:
     """
@@ -53,6 +63,67 @@ def sanitize_title_for_filesystem(text: str) -> str:
     # Collapse whitespace
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+def sanitize_channel_name(text: str) -> str:
+    """
+    Normalize exported channel names for picky DVR clients.
+
+    Keeps only letters, digits, and spaces, then collapses whitespace.
+    """
+    cleaned = sanitize_title_for_filesystem(text)
+    cleaned = re.sub(r"[^A-Za-z0-9]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def sanitize_export_text(text: str) -> str:
+    """
+    Normalize exported playlist metadata for clients that dislike punctuation.
+
+    Keeps only letters, digits, and spaces, then collapses whitespace.
+    """
+    return sanitize_channel_name(text)
+
+
+def normalize_feed_mode(mode: Optional[str]) -> str:
+    """Normalize user input to the supported feed mode set."""
+    value = (mode or 'default').strip().lower()
+    if value in {'default', 'pano', 'auto', 'both'}:
+        return value
+    return 'default'
+
+
+def display_feed_mode(mode: Optional[str]) -> str:
+    """Convert internal mode values to compact display labels."""
+    return FEED_MODE_LABELS.get(normalize_feed_mode(mode), 'Default')
+
+
+def get_channel_variants(favorite: Dict[str, str]) -> List[Dict[str, str]]:
+    """Expand a favorite into one or more logical channels for playlist/XMLTV output."""
+    preferred_mode = normalize_feed_mode(favorite.get('preferred_feed_mode'))
+    if preferred_mode == 'both':
+        requested_modes = ['pano', 'auto']
+    else:
+        requested_modes = [preferred_mode]
+
+    variants: List[Dict[str, str]] = []
+    for requested_mode in requested_modes:
+        normalized_mode = normalize_feed_mode(requested_mode)
+        if normalized_mode == 'default':
+            channel_id = str(favorite['surface_id'])
+            channel_number = str(favorite['surface_id'])
+        else:
+            channel_id = f"{favorite['surface_id']}-{normalized_mode}"
+            channel_number = f"{favorite['surface_id']}{FEED_MODE_IDS[normalized_mode]}"
+
+        variant = dict(favorite)
+        variant['requested_feed_mode'] = normalized_mode
+        variant['channel_id'] = channel_id
+        variant['channel_number'] = channel_number
+        variants.append(variant)
+
+    return variants
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -732,6 +803,16 @@ HTML_TEMPLATE = r"""
             display: flex;
             flex-direction: column;
             gap: 6px;
+        }
+
+        .favorite-mode-select {
+            min-width: 98px;
+            padding: 5px 8px;
+            font-size: 11px;
+            background: rgba(15, 23, 42, 0.96);
+            border-radius: 8px;
+            border: 1px solid rgba(55, 65, 81, 0.9);
+            color: #e5e7eb;
         }
 
         .btn-unfavorite {
@@ -1503,6 +1584,32 @@ HTML_TEMPLATE = r"""
             }
         }
 
+        async function setFavoriteMode(surfaceId, feedMode) {
+            try {
+                const response = await fetch(`/api/favorites/${surfaceId}/mode`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ feed_mode: feedMode })
+                });
+
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showToast(data.message || "Failed to update mode", "error");
+                    await refreshFavoritesList();
+                    return;
+                }
+
+                showToast(data.message || "Preferred mode updated", "success");
+                await refreshFavoritesList();
+            } catch (err) {
+                console.error("setFavoriteMode error:", err);
+                showToast("Error updating preferred mode.", "error");
+                await refreshFavoritesList();
+            }
+        }
+
         async function refreshFavoritesList() {
             try {
                 const response = await fetch("/api/favorites");
@@ -1544,6 +1651,18 @@ HTML_TEMPLATE = r"""
 
                 let html = "";
                 for (const fav of favorites) {
+                    const preferredMode = fav.preferred_feed_mode || "default";
+                    const currentMode = fav.current_feed_mode || "default";
+                    const currentModeLabel =
+                        currentMode === "default"
+                            ? "LiveBarn default"
+                            : currentMode.charAt(0).toUpperCase() + currentMode.slice(1);
+                    const preferredModeLabel =
+                        preferredMode === "default"
+                            ? "Default"
+                            : preferredMode.charAt(0).toUpperCase() + preferredMode.slice(1);
+                    const locationParts = [fav.city, fav.state].filter(Boolean);
+                    const locationText = locationParts.length ? locationParts.join(", ") : "Location unavailable";
                     html += `
                         <div class="favorites-item">
                             <div class="favorites-leading"></div>
@@ -1555,12 +1674,23 @@ HTML_TEMPLATE = r"""
                                     ${fav.surface_name || "Surface"}
                                 </div>
                                 <div class="favorites-meta">
-                                    <span>${fav.city || ""}, ${fav.state || ""}</span>
+                                    <span>${locationText}</span>
                                     <span>Surface ID: ${fav.surface_id}</span>
+                                    <span>Preferred: ${preferredModeLabel}</span>
+                                    <span>Mode: ${currentModeLabel}</span>
                                 </div>
                             </div>
                             <div class="favorites-actions">
                                 <div class="avatar">★</div>
+                                <select
+                                    class="favorite-mode-select"
+                                    onchange="setFavoriteMode(${fav.surface_id}, this.value); event.stopPropagation();"
+                                >
+                                    <option value="default" ${preferredMode === "default" ? "selected" : ""}>Default</option>
+                                    <option value="pano" ${preferredMode === "pano" ? "selected" : ""}>Pano</option>
+                                    <option value="auto" ${preferredMode === "auto" ? "selected" : ""}>Auto</option>
+                                    <option value="both" ${preferredMode === "both" ? "selected" : ""}>Both</option>
+                                </select>
                                 <button
                                     class="btn-unfavorite"
                                     type="button"
@@ -1647,7 +1777,31 @@ def get_db():
         finally:
             cur.close()
 
+        ensure_runtime_schema(g.db)
+
     return g.db
+
+
+def ensure_runtime_schema(conn: sqlite3.Connection) -> None:
+    """Apply lightweight in-place schema updates for older databases."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute("PRAGMA table_info(favorites)")
+        favorite_columns = {row[1] for row in cursor.fetchall()}
+        if 'preferred_feed_mode' not in favorite_columns:
+            cursor.execute(
+                "ALTER TABLE favorites ADD COLUMN preferred_feed_mode TEXT NOT NULL DEFAULT 'default'"
+            )
+
+        cursor.execute("PRAGMA table_info(surface_streams)")
+        stream_columns = {row[1] for row in cursor.fetchall()}
+        if 'feed_mode' not in stream_columns:
+            cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode TEXT")
+        if 'feed_mode_id' not in stream_columns:
+            cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode_id INTEGER")
+        conn.commit()
+    finally:
+        cursor.close()
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -1706,7 +1860,9 @@ def get_all_favorites():
         SELECT 
             v.id as venue_id, v.name as venue_name, v.city, v.state,
             s.id as surface_id, s.name as surface_name, s.uuid as stream_name,
-            ss.playlist_url, ss.full_captured_url
+            ss.playlist_url, ss.full_captured_url,
+            COALESCE(f.preferred_feed_mode, 'default') as preferred_feed_mode,
+            COALESCE(ss.feed_mode, 'default') as current_feed_mode
         FROM favorites f
         JOIN surfaces s ON f.surface_id = s.id
         JOIN venues v ON s.venue_id = v.id
@@ -1836,7 +1992,9 @@ def get_stream_info(surface_id):
             ss.playlist_url, 
             ss.full_captured_url,
             ss.venue_name,
-            ss.surface_name
+            ss.surface_name,
+            COALESCE(ss.feed_mode, 'default') as feed_mode,
+            ss.feed_mode_id
         FROM surface_streams ss
         WHERE ss.surface_id = ?
     ''', (surface_id,))
@@ -1848,9 +2006,40 @@ def get_stream_info(surface_id):
             'playlist_url': result['playlist_url'],
             'full_captured_url': result['full_captured_url'],
             'venue_name': result['venue_name'],
-            'surface_name': result['surface_name']
+            'surface_name': result['surface_name'],
+            'feed_mode': normalize_feed_mode(result['feed_mode']),
+            'feed_mode_id': result['feed_mode_id'],
         }
     return None
+
+
+def get_preferred_feed_mode(surface_id: int) -> str:
+    """Get the stored preferred feed mode for a favorite."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "SELECT COALESCE(preferred_feed_mode, 'default') FROM favorites WHERE surface_id = ?",
+        (surface_id,),
+    )
+    row = c.fetchone()
+    return normalize_feed_mode(row[0] if row else 'default')
+
+
+def set_preferred_feed_mode(surface_id: int, feed_mode: str) -> bool:
+    """Update the preferred feed mode for an existing favorite."""
+    normalized_mode = normalize_feed_mode(feed_mode)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favorites WHERE surface_id = ?", (surface_id,))
+    if not c.fetchone():
+        return False
+
+    c.execute(
+        "UPDATE favorites SET preferred_feed_mode = ? WHERE surface_id = ?",
+        (normalized_mode, surface_id),
+    )
+    conn.commit()
+    return True
 
 
 def get_stream_refresh_lock(surface_id: int) -> threading.Lock:
@@ -1863,9 +2052,20 @@ def get_stream_refresh_lock(surface_id: int) -> threading.Lock:
         return lock
 
 
-def stream_needs_refresh(stream_info: Optional[Dict[str, str]]) -> bool:
+def stream_needs_refresh(
+    stream_info: Optional[Dict[str, str]],
+    requested_mode: str = 'default',
+) -> bool:
     """Determine whether the cached playlist URL is missing or near expiry."""
     if not stream_info or not stream_info.get('playlist_url'):
+        return True
+
+    normalized_mode = normalize_feed_mode(requested_mode)
+    cached_mode = normalize_feed_mode(stream_info.get('feed_mode'))
+    if normalized_mode != 'default' and cached_mode != normalized_mode:
+        logger.info(
+            f" Cached stream mode is {cached_mode}; refreshing for requested mode {normalized_mode}"
+        )
         return True
 
     match = re.search(r'exp=(\d+)', stream_info['playlist_url'])
@@ -1882,6 +2082,23 @@ def stream_needs_refresh(stream_info: Optional[Dict[str, str]]) -> bool:
 
     logger.info(f" Token valid for {minutes_left:.0f} more minutes")
     return False
+
+
+def apply_mode_suffix(title: str, mode: str) -> str:
+    """Append a compact mode label for explicit Auto/Pano channels."""
+    normalized_mode = normalize_feed_mode(mode)
+    if normalized_mode == 'default':
+        return title
+    return f"{title} - {display_feed_mode(normalized_mode).upper()}"
+
+
+def build_proxy_url(surface_id: int, feed_mode: str) -> str:
+    """Build the proxy URL, including explicit mode overrides when configured."""
+    base_url = f"http://{SERVER_HOST_URL}:{PUBLIC_PORT}/proxy/{surface_id}"
+    normalized_mode = normalize_feed_mode(feed_mode)
+    if normalized_mode in {'default', 'both'}:
+        return base_url
+    return f"{base_url}?mode={normalized_mode}"
 
 # --- Flask Routes ---
 
@@ -2016,6 +2233,38 @@ def api_toggle_favorite(surface_id):
         }), 500
 
 
+@app.route('/api/favorites/<int:surface_id>/mode', methods=['POST'])
+def api_set_favorite_mode(surface_id):
+    """Update the preferred feed mode for a favorite."""
+    payload = request.get_json(silent=True) or {}
+    requested_mode = normalize_feed_mode(payload.get('feed_mode'))
+
+    try:
+        if not set_preferred_feed_mode(surface_id, requested_mode):
+            return jsonify({
+                "success": False,
+                "message": "Favorite not found."
+            }), 404
+
+        return jsonify({
+            "success": True,
+            "feed_mode": requested_mode,
+            "message": f"Preferred mode set to {display_feed_mode(requested_mode)}"
+        })
+    except sqlite3.OperationalError as e:
+        logger.error(f"Database error during API set_favorite_mode: {e}")
+        return jsonify({
+            "success": False,
+            "message": "Database is busy/locked. Please try again."
+        }), 503
+    except Exception as e:
+        logger.error(f"Unexpected error during API set_favorite_mode: {e}")
+        return jsonify({
+            "success": False,
+            "message": "Unexpected server error."
+        }), 500
+
+
 @app.route('/api/favorites', methods=['GET'])
 def api_get_favorites():
     """JSON API to return all favorites."""
@@ -2096,43 +2345,48 @@ def generate_playlist():
     
     lines = ['#EXTM3U']
     for fav in favorites:
-        surface_id = fav['surface_id']
-        venue_name = fav.get('venue_name', 'Unknown Venue')
-        surface_name = fav.get('surface_name', 'Surface')
-        city = fav.get('city', '')
-        state = fav.get('state', '')
-        
-        raw_title = f"{venue_name} - {surface_name}"
-        title = sanitize_title_for_filesystem(raw_title)
-        if city or state:
-            location = f" ({city}, {state})" if city and state else f" ({city or state})"
-        else:
-            location = ""
-        
-        # Build guide description
-        description = f" Live camera feed from {venue_name} - {surface_name}"
-        if city and state:
-            description += f" in {city}, {state}"
-        
-        proxy_url = f"http://{SERVER_HOST_URL}:{PUBLIC_PORT}/proxy/{surface_id}"
-        
-        # Channels DVR custom tags
-        extinf_line = (
-            f'#EXTINF:-1 '
-            f'channel-id="{surface_id}" '
-            f'channel-number="{surface_id}" '
-            f'tvg-id="{surface_id}" '
-            f'tvg-name="{title}" '
-            f'group-title="LiveBarn" '
-            f'tvc-guide-title="LIVE: {title}" '
-            f'tvc-guide-description="{description}" '
-            f'tvc-guide-tags="Live, HDTV" '
-            f'tvc-guide-genres="Sports" '
-            f'tvc-guide-placeholders="3600",'
-        ) + f'{title}{location}'
-        
-        lines.append(extinf_line)
-        lines.append(proxy_url)
+        for variant in get_channel_variants(fav):
+            surface_id = variant['surface_id']
+            venue_name = variant.get('venue_name', 'Unknown Venue')
+            surface_name = variant.get('surface_name', 'Surface')
+            city = variant.get('city', '')
+            state = variant.get('state', '')
+            requested_feed_mode = normalize_feed_mode(variant.get('requested_feed_mode'))
+
+            raw_title = f"{venue_name} - {surface_name}"
+            title = sanitize_channel_name(apply_mode_suffix(raw_title, requested_feed_mode))
+            if city or state:
+                raw_location = f"{city}, {state}" if city and state else f"{city or state}"
+                location = f" {sanitize_export_text(raw_location)}"
+            else:
+                location = ""
+
+            description = f" Live camera feed from {venue_name} - {surface_name}"
+            if city and state:
+                description += f" in {city}, {state}"
+            if requested_feed_mode != 'default':
+                description += f" [{display_feed_mode(requested_feed_mode).upper()} view]"
+            description = sanitize_export_text(description)
+            guide_title = sanitize_export_text(f"LIVE {title}")
+
+            proxy_url = build_proxy_url(surface_id, requested_feed_mode)
+
+            extinf_line = (
+                f'#EXTINF:-1 '
+                f'channel-id="{variant["channel_id"]}" '
+                f'channel-number="{variant["channel_number"]}" '
+                f'tvg-id="{variant["channel_id"]}" '
+                f'tvg-name="{title}" '
+                f'group-title="LiveBarn" '
+                f'tvc-guide-title="{guide_title}" '
+                f'tvc-guide-description="{description}" '
+                f'tvc-guide-tags="Live HDTV" '
+                f'tvc-guide-genres="Sports" '
+                f'tvc-guide-placeholders="3600",'
+            ) + f'{title}{location}'
+
+            lines.append(extinf_line)
+            lines.append(proxy_url)
     
     playlist_content = '\n'.join(lines)
     return Response(playlist_content, mimetype='application/x-mpegURL')
@@ -2164,96 +2418,92 @@ def xmltv_endpoint():
     
     # Create channels
     for fav in favorites:
-        surface_id = fav['surface_id']
-        venue_name = fav.get('venue_name', 'Unknown Venue')
-        surface_name = fav.get('surface_name', 'Surface')
-        city = fav.get('city', '')
-        state = fav.get('state', '')
-        
-        title = f"{venue_name} - {surface_name}"
-        if city and state:
-            location_str = f"{city}, {state}"
-        elif city or state:
-            location_str = city or state
-        else:
-            location_str = ""
-        
-        channel = ET.SubElement(tv, 'channel')
-        channel.set('id', str(surface_id))
-        
-        display_name = ET.SubElement(channel, 'display-name')
-        display_name.text = sanitize_title_for_filesystem(title)
-        
-        if location_str:
-            display_name_loc = ET.SubElement(channel, 'display-name')
-            display_name_loc.text = sanitize_title_for_filesystem(location_str)
-        
-        # Icon
-        icon = ET.SubElement(channel, 'icon')
-        icon.set('src', 'https://www.thechiller.com/assets/images/logo_300.png')
+        for variant in get_channel_variants(fav):
+            venue_name = variant.get('venue_name', 'Unknown Venue')
+            surface_name = variant.get('surface_name', 'Surface')
+            city = variant.get('city', '')
+            state = variant.get('state', '')
+            requested_feed_mode = normalize_feed_mode(variant.get('requested_feed_mode'))
+
+            title = apply_mode_suffix(f"{venue_name} - {surface_name}", requested_feed_mode)
+            if city and state:
+                location_str = f"{city}, {state}"
+            elif city or state:
+                location_str = city or state
+            else:
+                location_str = ""
+
+            channel = ET.SubElement(tv, 'channel')
+            channel.set('id', variant['channel_id'])
+
+            display_name = ET.SubElement(channel, 'display-name')
+            display_name.text = sanitize_channel_name(title)
+
+            if location_str:
+                display_name_loc = ET.SubElement(channel, 'display-name')
+                display_name_loc.text = sanitize_channel_name(location_str)
+
+            icon = ET.SubElement(channel, 'icon')
+            icon.set('src', 'https://www.thechiller.com/assets/images/logo_300.png')
     
     # Create programs
     for fav in favorites:
-        surface_id = fav['surface_id']
-        venue_name = fav.get('venue_name', 'Unknown Venue')
-        surface_name = fav.get('surface_name', 'Surface')
-        city = fav.get('city', '')
-        state = fav.get('state', '')
-        
-        # Get Chiller events for this surface
-        surface_events = events_by_surface.get(surface_id, [])
-        
-        if surface_events:
-            # We have Chiller schedule data - create real programs with Open Ice fillers
-            programs = fill_gaps_with_open_ice(surface_events, today_start, tomorrow_end)
-        else:
-            # No schedule data - create 1-hour LIVE blocks for easier navigation
-            programs = create_hourly_live_blocks(today_start, tomorrow_end, venue_name, surface_name)
-        
-        # Create programme elements
-        for prog_start, prog_end, prog_title in programs:
-            programme = ET.SubElement(tv, 'programme')
-            programme.set('channel', str(surface_id))
-            programme.set('start', prog_start.strftime('%Y%m%d%H%M%S ') + tz_offset)
-            programme.set('stop', prog_end.strftime('%Y%m%d%H%M%S ') + tz_offset)
-            
-            # Program title
-            title_elem = ET.SubElement(programme, 'title')
-            title_elem.set('lang', 'en')
-            title_elem.text = sanitize_title_for_filesystem(prog_title)
-            
-            # Check if this is a generic hourly block (title == venue - surface)
-            is_generic_block = prog_title == f"{venue_name} - {surface_name}"
-            
-            # Description
-            if is_generic_block:
-                # For generic blocks: just show rink name (time is in the programme start/stop)
-                desc_text = f"{venue_name} - {surface_name}"
+        for variant in get_channel_variants(fav):
+            surface_id = variant['surface_id']
+            venue_name = variant.get('venue_name', 'Unknown Venue')
+            surface_name = variant.get('surface_name', 'Surface')
+            requested_feed_mode = normalize_feed_mode(variant.get('requested_feed_mode'))
+            mode_suffix = display_feed_mode(requested_feed_mode).upper()
+            display_surface_name = apply_mode_suffix(
+                f"{venue_name} - {surface_name}",
+                requested_feed_mode,
+            )
+
+            surface_events = events_by_surface.get(surface_id, [])
+
+            if surface_events:
+                programs = fill_gaps_with_open_ice(surface_events, today_start, tomorrow_end)
             else:
-                # For real events: show event name + rink name
-                desc_parts = [prog_title, f"{venue_name} - {surface_name}"]
-                desc_text = "\n".join(desc_parts)
-            
-            desc = ET.SubElement(programme, 'desc')
-            desc.set('lang', 'en')
-            desc.text = desc_text
-            
-            # Category / sub-category (skip for Open Ice placeholders AND generic blocks)
-            if "Open Ice" not in prog_title and not is_generic_block:
-                category = ET.SubElement(programme, 'category')
-                category.set('lang', 'en')
-                category.text = "Sports"
-                
-                sub_category = ET.SubElement(programme, 'category')
-                sub_category.set('lang', 'en')
-                sub_category.text = "Ice Hockey"
-                
-                provider_category = ET.SubElement(programme, 'category')
-                provider_category.set('lang', 'en')
-                provider_category.text = "Livebarn"
-                
-                # Live flag
-                ET.SubElement(programme, 'live')
+                programs = create_hourly_live_blocks(today_start, tomorrow_end, venue_name, surface_name)
+
+            for prog_start, prog_end, prog_title in programs:
+                programme = ET.SubElement(tv, 'programme')
+                programme.set('channel', variant['channel_id'])
+                programme.set('start', prog_start.strftime('%Y%m%d%H%M%S ') + tz_offset)
+                programme.set('stop', prog_end.strftime('%Y%m%d%H%M%S ') + tz_offset)
+
+                title_elem = ET.SubElement(programme, 'title')
+                title_elem.set('lang', 'en')
+                title_elem.text = sanitize_title_for_filesystem(prog_title)
+
+                is_generic_block = prog_title == f"{venue_name} - {surface_name}"
+
+                if is_generic_block:
+                    desc_text = display_surface_name
+                else:
+                    desc_parts = [prog_title, display_surface_name]
+                    if requested_feed_mode != 'default':
+                        desc_parts.append(f"Feed Mode: {mode_suffix}")
+                    desc_text = "\n".join(desc_parts)
+
+                desc = ET.SubElement(programme, 'desc')
+                desc.set('lang', 'en')
+                desc.text = desc_text
+
+                if "Open Ice" not in prog_title and not is_generic_block:
+                    category = ET.SubElement(programme, 'category')
+                    category.set('lang', 'en')
+                    category.text = "Sports"
+
+                    sub_category = ET.SubElement(programme, 'category')
+                    sub_category.set('lang', 'en')
+                    sub_category.text = "Ice Hockey"
+
+                    provider_category = ET.SubElement(programme, 'category')
+                    provider_category.set('lang', 'en')
+                    provider_category.text = "Livebarn"
+
+                    ET.SubElement(programme, 'live')
     
     # Convert to string with proper XML declaration
     xml_string = ET.tostring(tv, encoding='unicode')
@@ -2279,17 +2529,24 @@ def proxy_stream(surface_id):
     Streamlink proxy with automatic token refresh.
     If stream URL is expired/old, auto-refreshes it before streaming.
     """
+    requested_mode = normalize_feed_mode(request.args.get('mode') or get_preferred_feed_mode(surface_id))
+    if requested_mode == 'both':
+        requested_mode = 'default'
     stream_info = get_stream_info(surface_id)
     
     # Check if we need to refresh the token
-    needs_refresh = stream_needs_refresh(stream_info)
+    needs_refresh = stream_needs_refresh(stream_info, requested_mode)
 
     if needs_refresh and (not stream_info or not stream_info.get('playlist_url')):
-        logger.warning(f" No stream found for surface_id={surface_id}, will try to capture")
+        logger.warning(
+            f" No stream found for surface_id={surface_id} in mode={requested_mode}, will try to capture"
+        )
     
     # Auto-refresh if needed
     if needs_refresh:
-        logger.info(f" Auto-refreshing stream for surface_id={surface_id}...")
+        logger.info(
+            f" Auto-refreshing stream for surface_id={surface_id} with mode={requested_mode}..."
+        )
 
         refresh_lock = get_stream_refresh_lock(surface_id)
         if not refresh_lock.acquire(timeout=90):
@@ -2299,9 +2556,9 @@ def proxy_stream(surface_id):
         import subprocess as sp
         try:
             stream_info = get_stream_info(surface_id)
-            if stream_needs_refresh(stream_info):
+            if stream_needs_refresh(stream_info, requested_mode):
                 result = sp.run(
-                    [sys.executable, 'refresh_single.py', str(surface_id)],
+                    [sys.executable, 'refresh_single.py', str(surface_id), requested_mode],
                     capture_output=True,
                     text=True,
                     timeout=45,
@@ -2312,10 +2569,26 @@ def proxy_stream(surface_id):
                     logger.info(" Auto-refresh succeeded!")
                     stream_info = get_stream_info(surface_id)
                 else:
-                    logger.error(f" Auto-refresh failed: {result.stderr}")
+                    stderr_text = (result.stderr or '').strip()
+                    if 'LiveBarn reports that this live stream has ended' in stderr_text:
+                        logger.info(
+                            f" Auto-refresh skipped for surface_id={surface_id}: {stderr_text}"
+                        )
+                        return "LiveBarn reports that this live stream has ended", 503
+                    if 'Requested feed mode' in stderr_text and 'is unavailable' in stderr_text:
+                        logger.info(
+                            f" Auto-refresh skipped for surface_id={surface_id}: {stderr_text}"
+                        )
+                        return stderr_text, 503
+                    logger.error(f" Auto-refresh failed: {stderr_text or result.stderr}")
+                    if stderr_text:
+                        tail = stderr_text.splitlines()[-1]
+                        return f"Auto-refresh failed: {tail}", 500
                     return f"Auto-refresh failed for surface_id={surface_id}", 500
             else:
-                logger.info(f" Refresh skipped for surface_id={surface_id}; another request already updated it")
+                logger.info(
+                    f" Refresh skipped for surface_id={surface_id}; another request already updated it"
+                )
         except sp.TimeoutExpired:
             logger.error(" Auto-refresh timeout")
             return f"Auto-refresh timeout for surface_id={surface_id}", 500
@@ -2331,9 +2604,13 @@ def proxy_stream(surface_id):
     playlist_url = stream_info['playlist_url']
     venue_name = stream_info.get('venue_name', 'Unknown')
     surface_name = stream_info.get('surface_name', 'Unknown')
-    stream_name = f"{venue_name} - {surface_name}"
+    resolved_mode = normalize_feed_mode(stream_info.get('feed_mode'))
+    stream_name = apply_mode_suffix(f"{venue_name} - {surface_name}", requested_mode)
     
-    logger.info(f" Streaming surface_id={surface_id}: {stream_name}")
+    logger.info(
+        f" Streaming surface_id={surface_id}: {stream_name} "
+        f"(requested={requested_mode}, resolved={resolved_mode})"
+    )
     logger.info(f"   URL: {playlist_url[:80]}...")
     
     def generate():
@@ -2430,6 +2707,7 @@ def init_db_if_needed():
         return
     
     conn = sqlite3.connect(DB_PATH)
+    ensure_runtime_schema(conn)
     c = conn.cursor()
     required_tables = ['venues', 'surfaces', 'favorites', 'surface_streams']
     missing = []
