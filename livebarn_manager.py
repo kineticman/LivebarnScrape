@@ -817,6 +817,40 @@ HTML_TEMPLATE = r"""
             color: #e5e7eb;
         }
 
+        .pin-row {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .pin-input {
+            width: 52px;
+            padding: 4px 6px;
+            border-radius: 6px;
+            border: 1px solid rgba(99, 102, 241, 0.4);
+            background: rgba(15, 23, 42, 0.8);
+            color: #e2e8f0;
+            font-size: 12px;
+            font-family: monospace;
+            letter-spacing: 2px;
+            text-align: center;
+        }
+
+        .btn-pin-save {
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(99, 102, 241, 0.5);
+            background: rgba(49, 46, 129, 0.8);
+            color: #c7d2fe;
+            font-size: 11px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn-pin-save:hover {
+            background: rgba(67, 56, 202, 0.9);
+        }
+
         .btn-unfavorite {
             padding: 4px 9px;
             border-radius: 999px;
@@ -1612,6 +1646,26 @@ HTML_TEMPLATE = r"""
             }
         }
 
+        async function setFavoritePin(surfaceId, pin) {
+            try {
+                const response = await fetch(`/api/favorites/${surfaceId}/pin`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ pin_code: pin })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showToast(data.message || "Failed to save PIN", "error");
+                    return;
+                }
+                showToast(data.message, "success");
+                await refreshFavoritesList();
+            } catch (err) {
+                console.error("setFavoritePin error:", err);
+                showToast("Error saving PIN.", "error");
+            }
+        }
+
         async function refreshFavoritesList() {
             try {
                 const response = await fetch("/api/favorites");
@@ -1693,6 +1747,23 @@ HTML_TEMPLATE = r"""
                                     <option value="auto" ${preferredMode === "auto" ? "selected" : ""}>Auto</option>
                                     <option value="both" ${preferredMode === "both" ? "selected" : ""}>Both</option>
                                 </select>
+                                <div class="pin-row" onclick="event.stopPropagation()">
+                                    <input
+                                        type="text"
+                                        inputmode="numeric"
+                                        maxlength="4"
+                                        pattern="[0-9]{4}"
+                                        placeholder="PIN"
+                                        class="pin-input"
+                                        value="${fav.pin_code || ''}"
+                                        id="pin-${fav.surface_id}"
+                                    />
+                                    <button
+                                        class="btn-pin-save"
+                                        type="button"
+                                        onclick="setFavoritePin(${fav.surface_id}, document.getElementById('pin-${fav.surface_id}').value.trim()); event.stopPropagation();"
+                                    >Save PIN</button>
+                                </div>
                                 <button
                                     class="btn-unfavorite"
                                     type="button"
@@ -1794,6 +1865,8 @@ def ensure_runtime_schema(conn: sqlite3.Connection) -> None:
             cursor.execute(
                 "ALTER TABLE favorites ADD COLUMN preferred_feed_mode TEXT NOT NULL DEFAULT 'default'"
             )
+        if 'pin_code' not in favorite_columns:
+            cursor.execute("ALTER TABLE favorites ADD COLUMN pin_code TEXT")
 
         cursor.execute("PRAGMA table_info(surface_streams)")
         stream_columns = {row[1] for row in cursor.fetchall()}
@@ -1864,7 +1937,8 @@ def get_all_favorites():
             s.id as surface_id, s.name as surface_name, s.uuid as stream_name,
             ss.playlist_url, ss.full_captured_url,
             COALESCE(f.preferred_feed_mode, 'default') as preferred_feed_mode,
-            COALESCE(ss.feed_mode, 'default') as current_feed_mode
+            COALESCE(ss.feed_mode, 'default') as current_feed_mode,
+            f.pin_code
         FROM favorites f
         JOIN surfaces s ON f.surface_id = s.id
         JOIN venues v ON s.venue_id = v.id
@@ -2039,6 +2113,21 @@ def set_preferred_feed_mode(surface_id: int, feed_mode: str) -> bool:
     c.execute(
         "UPDATE favorites SET preferred_feed_mode = ? WHERE surface_id = ?",
         (normalized_mode, surface_id),
+    )
+    conn.commit()
+    return True
+
+
+def set_pin_code(surface_id: int, pin_code: str | None) -> bool:
+    """Store or clear a PIN code for a favorite surface."""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM favorites WHERE surface_id = ?", (surface_id,))
+    if not c.fetchone():
+        return False
+    c.execute(
+        "UPDATE favorites SET pin_code = ? WHERE surface_id = ?",
+        (pin_code or None, surface_id),
     )
     conn.commit()
     return True
@@ -2266,6 +2355,25 @@ def api_set_favorite_mode(surface_id):
             "success": False,
             "message": "Unexpected server error."
         }), 500
+
+
+@app.route('/api/favorites/<int:surface_id>/pin', methods=['POST'])
+def api_set_favorite_pin(surface_id):
+    """Store or clear a PIN code for a favorite surface."""
+    payload = request.get_json(silent=True) or {}
+    pin_code = payload.get('pin_code', '').strip() or None
+
+    try:
+        if not set_pin_code(surface_id, pin_code):
+            return jsonify({"success": False, "message": "Favorite not found."}), 404
+        msg = f"PIN saved" if pin_code else "PIN cleared"
+        return jsonify({"success": True, "message": msg})
+    except sqlite3.OperationalError as e:
+        logger.error(f"Database error during API set_favorite_pin: {e}")
+        return jsonify({"success": False, "message": "Database is busy/locked. Please try again."}), 503
+    except Exception as e:
+        logger.error(f"Unexpected error during API set_favorite_pin: {e}")
+        return jsonify({"success": False, "message": "Unexpected server error."}), 500
 
 
 @app.route('/api/favorites', methods=['GET'])

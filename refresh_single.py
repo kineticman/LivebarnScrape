@@ -49,6 +49,12 @@ def ensure_runtime_schema(conn: sqlite3.Connection) -> None:
         cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode TEXT")
     if 'feed_mode_id' not in stream_columns:
         cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode_id INTEGER")
+
+    cursor.execute("PRAGMA table_info(favorites)")
+    favorite_columns = {row[1] for row in cursor.fetchall()}
+    if 'pin_code' not in favorite_columns:
+        cursor.execute("ALTER TABLE favorites ADD COLUMN pin_code TEXT")
+
     conn.commit()
 
 
@@ -70,7 +76,7 @@ def get_credentials():
     )
 
 
-def get_surface_details(surface_id: int) -> tuple[str, str, str]:
+def get_surface_details(surface_id: int) -> tuple[str, str, str, str | None]:
     """Return venue name, surface name, and preferred mode."""
     conn = sqlite3.connect(DB_PATH)
     ensure_runtime_schema(conn)
@@ -80,7 +86,8 @@ def get_surface_details(surface_id: int) -> tuple[str, str, str]:
         SELECT
             v.name,
             s.name,
-            COALESCE(f.preferred_feed_mode, 'default')
+            COALESCE(f.preferred_feed_mode, 'default'),
+            f.pin_code
         FROM surfaces s
         JOIN venues v ON s.venue_id = v.id
         LEFT JOIN favorites f ON f.surface_id = s.id
@@ -94,8 +101,8 @@ def get_surface_details(surface_id: int) -> tuple[str, str, str]:
     if not result:
         raise ValueError(f"Surface {surface_id} not found")
 
-    venue_name, surface_name, preferred_mode = result
-    return venue_name, surface_name, normalize_feed_mode(preferred_mode)
+    venue_name, surface_name, preferred_mode, pin_code = result
+    return venue_name, surface_name, normalize_feed_mode(preferred_mode), pin_code
 
 
 def extract_playlist_candidate(url: str) -> str | None:
@@ -162,6 +169,7 @@ async def login_and_capture_stream(
     surface_id: int,
     requested_mode: str,
     creds: dict,
+    pin: str | None = None,
 ) -> tuple[str, str, int | None]:
     """
     Log into LiveBarn, optionally switch the player mode, and capture the signed
@@ -200,6 +208,20 @@ async def login_and_capture_stream(
             timeout=30000,
         )
         await page.wait_for_timeout(3000)
+
+        page_text = await page.evaluate('''() => document.body.innerText''')
+        if 'Privacy Code' in page_text:
+            if not pin:
+                raise RuntimeError(
+                    "Surface requires a PIN code — set one in the favorites panel"
+                )
+            await page.locator('form input[type="text"]').first.fill(pin)
+            await page.get_by_role('button', name='CONTINUE').click()
+            await page.wait_for_timeout(3000)
+            page_text = await page.evaluate('''() => document.body.innerText''')
+            if 'Privacy Code' in page_text:
+                raise RuntimeError("PIN code was rejected by LiveBarn")
+
         initial_url = await wait_for_playlist_capture(captured_urls, timeout_seconds=10)
         page_text = await page.evaluate('''() => document.body.innerText''')
 
@@ -228,13 +250,14 @@ async def login_and_capture_stream(
 
 async def refresh_single_stream(surface_id: int, requested_mode: str | None = None):
     """Refresh a single stream, preferring the requested or configured feed mode."""
-    venue_name, surface_name, preferred_mode = get_surface_details(surface_id)
+    venue_name, surface_name, preferred_mode, pin_code = get_surface_details(surface_id)
     mode_request = normalize_feed_mode(requested_mode or preferred_mode)
     creds = get_credentials()
     captured_url, resolved_mode, resolved_mode_id = await login_and_capture_stream(
         surface_id,
         mode_request,
         creds,
+        pin=pin_code,
     )
 
     if mode_request in {'pano', 'auto'} and resolved_mode != mode_request:
