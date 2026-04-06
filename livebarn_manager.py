@@ -41,6 +41,7 @@ FEED_MODE_LABELS = {
     'auto': 'Auto',
     'both': 'Both',
 }
+APP_VERSION = (Path(__file__).with_name('VERSION').read_text(encoding='utf-8').strip() or 'dev')
 
 def sanitize_title_for_filesystem(text: str) -> str:
     """
@@ -206,6 +207,7 @@ DB_PATH = Path(os.getenv('DB_PATH', '/data/livebarn.db'))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 logger.info(f"📁 Database directory: {DB_PATH.parent}")
 logger.info(f" Database file: {DB_PATH}")
+logger.info(f" App version: v{APP_VERSION}")
 
 # Keep this fairly short so UI errors out quickly instead of appearing frozen on locks
 SQLITE_TIMEOUT = 3
@@ -1231,7 +1233,7 @@ HTML_TEMPLATE = r"""
             <div>
                 <h1>
                     LiveBarn Manager
-                    <span class="badge">v2.0</span>
+                    <span class="badge">v{{ app_version }}</span>
                 </h1>
                 <div class="subtitle">Favorites • Playlists • Streamlink Proxy</div>
             </div>
@@ -2124,7 +2126,8 @@ def index():
         state_list=state_list,
         server_host=SERVER_HOST_URL,
         server_port=PUBLIC_PORT,
-        db_path=str(DB_PATH)
+        db_path=str(DB_PATH),
+        app_version=APP_VERSION,
     )
 
 @app.route('/venue/<int:venue_id>')
@@ -2407,7 +2410,7 @@ def xmltv_endpoint():
     
     # Create root TV element
     tv = ET.Element('tv')
-    tv.set('generator-info-name', 'LiveBarn Manager + Chiller')
+    tv.set('generator-info-name', f'LiveBarn Manager v{APP_VERSION} + Chiller')
     tv.set('generator-info-url', f'http://{SERVER_HOST_URL}:{PUBLIC_PORT}')
     
     # Time range for programs
@@ -2748,7 +2751,7 @@ if __name__ == '__main__':
     init_db_if_needed()
     
     print("=" * 70)
-    print(" LiveBarn Favorites Manager & Streamlink Proxy ".center(70, "="))
+    print(f" LiveBarn Favorites Manager & Streamlink Proxy v{APP_VERSION} ".center(70, "="))
     print(f"  Database: {DB_PATH}")
     print(f"  Playlist: http://{SERVER_HOST_URL}:{PUBLIC_PORT}/playlist.m3u")
     print(f"  XMLTV:    http://{SERVER_HOST_URL}:{PUBLIC_PORT}/xmltv")

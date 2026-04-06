@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 
 # Copy application files
+COPY VERSION .
 COPY livebarn_manager.py .
 COPY build_catalog.py .
 COPY refresh_single.py .

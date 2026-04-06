@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
+APP_VERSION="$(cat /app/VERSION 2>/dev/null || echo dev)"
+
 echo "=========================================="
-echo " LiveBarn Manager - Docker Startup"
+echo " LiveBarn Manager v${APP_VERSION} - Docker Startup"
 echo "=========================================="
 echo ""
 
@@ -56,6 +58,6 @@ if [ "$DB_EXISTS" = false ] || [ "$DB_HAS_DATA" = false ]; then
 fi
 
 # Start the manager
-echo "🚀 Starting LiveBarn Manager..."
+echo "🚀 Starting LiveBarn Manager v${APP_VERSION}..."
 echo ""
 exec python livebarn_manager.py
