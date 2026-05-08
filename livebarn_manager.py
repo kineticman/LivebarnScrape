@@ -4,6 +4,7 @@ LiveBarn Streamlink Proxy Server with Favorites Management
 Browse venues, manage favorites, auto-capture streams
 """
 
+import select
 import sqlite3
 import subprocess
 import sys
@@ -19,7 +20,7 @@ import threading
 from datetime import datetime, timedelta, time as dt_time
 from collections import deque
 from typing import List, Dict, Tuple, Optional
-from flask import Flask, Response, request, jsonify, render_template_string, g
+from flask import Flask, Response, request, jsonify, render_template_string, g, stream_with_context
 from pathlib import Path
 import socket
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -35,6 +36,10 @@ FEED_MODE_IDS = {
     'pano': 4,
     'auto': 5,
 }
+
+# MPEG-TS null packet (PID 0x1FFF) — valid filler ignored by all compliant players.
+# Sent during stream token refresh to keep the player connection alive.
+_NULL_TS_PACKET = bytes([0x47, 0x1F, 0xFF, 0x10]) + bytes([0xFF] * 184)
 FEED_MODE_LABELS = {
     'default': 'Default',
     'pano': 'Pano',
@@ -2089,6 +2094,22 @@ def get_stream_info(surface_id):
     return None
 
 
+def _get_stream_info_direct(surface_id: int) -> Optional[Dict]:
+    """Thread-safe variant of get_stream_info that opens its own connection (no Flask context)."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=SQLITE_TIMEOUT)
+    conn.row_factory = sqlite3.Row
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT playlist_url, feed_mode FROM surface_streams WHERE surface_id = ?',
+            (surface_id,),
+        )
+        row = cursor.fetchone()
+        return {'playlist_url': row['playlist_url'], 'feed_mode': row['feed_mode']} if row else None
+    finally:
+        conn.close()
+
+
 def get_preferred_feed_mode(surface_id: int) -> str:
     """Get the stored preferred feed mode for a favorite."""
     conn = get_db()
@@ -2638,136 +2659,144 @@ def xmltv_endpoint():
 def proxy_stream(surface_id):
     """
     Streamlink proxy with automatic token refresh.
-    If stream URL is expired/old, auto-refreshes it before streaming.
+    If the stream token is expired the refresh runs in a background thread while
+    the generator sends MPEG-TS null packets so the player connection stays alive.
     """
     requested_mode = normalize_feed_mode(request.args.get('mode') or get_preferred_feed_mode(surface_id))
     if requested_mode == 'both':
         requested_mode = 'default'
+
     stream_info = get_stream_info(surface_id)
-    
-    # Check if we need to refresh the token
     needs_refresh = stream_needs_refresh(stream_info, requested_mode)
 
     if needs_refresh and (not stream_info or not stream_info.get('playlist_url')):
         logger.warning(
             f" No stream found for surface_id={surface_id} in mode={requested_mode}, will try to capture"
         )
-    
-    # Auto-refresh if needed
-    if needs_refresh:
-        logger.info(
-            f" Auto-refreshing stream for surface_id={surface_id} with mode={requested_mode}..."
-        )
 
-        refresh_lock = get_stream_refresh_lock(surface_id)
-        if not refresh_lock.acquire(timeout=90):
-            logger.error(f" Timed out waiting for refresh lock for surface_id={surface_id}")
-            return f"Refresh lock timeout for surface_id={surface_id}", 503
+    # Capture for closure — generator may update this after a background refresh.
+    _stream_info: List[Optional[Dict]] = [stream_info]
 
-        import subprocess as sp
-        try:
-            stream_info = get_stream_info(surface_id)
-            if stream_needs_refresh(stream_info, requested_mode):
-                result = sp.run(
-                    [sys.executable, 'refresh_single.py', str(surface_id), requested_mode],
-                    capture_output=True,
-                    text=True,
-                    timeout=45,
-                    cwd=str(Path(__file__).parent)
-                )
-                
-                if result.returncode == 0:
-                    logger.info(" Auto-refresh succeeded!")
-                    stream_info = get_stream_info(surface_id)
-                else:
-                    stderr_text = (result.stderr or '').strip()
-                    if 'LiveBarn reports that this live stream has ended' in stderr_text:
-                        logger.info(
-                            f" Auto-refresh skipped for surface_id={surface_id}: {stderr_text}"
-                        )
-                        return "LiveBarn reports that this live stream has ended", 503
-                    if 'Requested feed mode' in stderr_text and 'is unavailable' in stderr_text:
-                        logger.info(
-                            f" Auto-refresh skipped for surface_id={surface_id}: {stderr_text}"
-                        )
-                        return stderr_text, 503
-                    logger.error(f" Auto-refresh failed: {stderr_text or result.stderr}")
-                    if stderr_text:
-                        tail = stderr_text.splitlines()[-1]
-                        return f"Auto-refresh failed: {tail}", 500
-                    return f"Auto-refresh failed for surface_id={surface_id}", 500
-            else:
-                logger.info(
-                    f" Refresh skipped for surface_id={surface_id}; another request already updated it"
-                )
-        except sp.TimeoutExpired:
-            logger.error(" Auto-refresh timeout")
-            return f"Auto-refresh timeout for surface_id={surface_id}", 500
-        except Exception as e:
-            logger.error(f" Auto-refresh error: {e}")
-            return f"Auto-refresh error: {e}", 500
-        finally:
-            refresh_lock.release()
-    
-    if not stream_info or not stream_info.get('playlist_url'):
-        return f"No stream found for surface_id={surface_id} even after refresh", 404
-    
-    playlist_url = stream_info['playlist_url']
-    venue_name = stream_info.get('venue_name', 'Unknown')
-    surface_name = stream_info.get('surface_name', 'Unknown')
-    resolved_mode = normalize_feed_mode(stream_info.get('feed_mode'))
-    stream_name = apply_mode_suffix(f"{venue_name} - {surface_name}", requested_mode)
-    
-    logger.info(
-        f" Streaming surface_id={surface_id}: {stream_name} "
-        f"(requested={requested_mode}, resolved={resolved_mode})"
-    )
-    logger.info(f"   URL: {playlist_url[:80]}...")
-    
     def generate():
-        """Generator with pre-buffering to prevent VLC 'end of stream' error"""
+        # --- background refresh with null-packet keepalive ---
+        if needs_refresh:
+            logger.info(
+                f" Auto-refreshing stream for surface_id={surface_id} mode={requested_mode}..."
+            )
+
+            _result: Dict = {}
+            _done = threading.Event()
+
+            def _do_refresh():
+                lock = get_stream_refresh_lock(surface_id)
+                if not lock.acquire(timeout=90):
+                    _result['error'] = 'lock timeout'
+                    _done.set()
+                    return
+                try:
+                    # Double-check now that we hold the lock; another thread may have refreshed.
+                    si = _get_stream_info_direct(surface_id)
+                    if stream_needs_refresh(si, requested_mode):
+                        proc = subprocess.run(
+                            [sys.executable, 'refresh_single.py', str(surface_id), requested_mode],
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                            cwd=str(Path(__file__).parent),
+                        )
+                        _result['returncode'] = proc.returncode
+                        _result['stderr'] = (proc.stderr or '').strip()
+                    else:
+                        logger.info(
+                            f" Refresh skipped for surface_id={surface_id}; another request already updated it"
+                        )
+                        _result['returncode'] = 0
+                except subprocess.TimeoutExpired:
+                    _result['error'] = 'subprocess timeout'
+                except Exception as exc:
+                    _result['error'] = str(exc)
+                finally:
+                    lock.release()
+                    _done.set()
+
+            t = threading.Thread(target=_do_refresh, daemon=True)
+            t.start()
+
+            # Send null TS packets every 0.5 s to keep the player connection alive.
+            deadline = time.monotonic() + 95
+            while not _done.wait(timeout=0.5) and time.monotonic() < deadline:
+                yield _NULL_TS_PACKET * 10  # ~1880 bytes, well under any player buffer
+
+            if _result.get('error'):
+                logger.error(f" Auto-refresh error: {_result['error']}")
+                return
+            rc = _result.get('returncode', -1)
+            if rc != 0:
+                stderr_text = _result.get('stderr', '')
+                if 'LiveBarn reports that this live stream has ended' in stderr_text:
+                    logger.info(f" Auto-refresh: stream ended for surface_id={surface_id}")
+                elif 'Requested feed mode' in stderr_text and 'is unavailable' in stderr_text:
+                    logger.info(f" Auto-refresh: mode unavailable for surface_id={surface_id}")
+                else:
+                    logger.error(f" Auto-refresh failed: {stderr_text}")
+                return
+
+            logger.info(f" Auto-refresh succeeded for surface_id={surface_id}")
+            _stream_info[0] = get_stream_info(surface_id)
+
+        # --- resolve stream URL ---
+        si = _stream_info[0]
+        if not si or not si.get('playlist_url'):
+            logger.error(f" No stream URL available for surface_id={surface_id}")
+            return
+
+        playlist_url = si['playlist_url']
+        venue_name = si.get('venue_name', 'Unknown')
+        surface_name = si.get('surface_name', 'Unknown')
+        stream_name = apply_mode_suffix(f"{venue_name} - {surface_name}", requested_mode)
+        logger.info(
+            f" Streaming surface_id={surface_id}: {stream_name} "
+            f"(requested={requested_mode}, resolved={normalize_feed_mode(si.get('feed_mode'))})"
+        )
+        logger.info(f"   URL: {playlist_url[:80]}...")
+
+        # --- launch streamlink ---
         logger.info(f"    Launching streamlink subprocess")
-        
         process = subprocess.Popen(
-            [
-                'streamlink',
-                '--stdout',
-                '--loglevel', 'error',
-                playlist_url,
-                'best'
-            ],
+            ['streamlink', '--stdout', '--loglevel', 'error', playlist_url, 'best'],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            bufsize=0  # No buffering - immediate data
+            bufsize=0,
         )
-        
-        # PRE-BUFFER: Wait for first chunk before yielding
+
+        # PRE-BUFFER: wait for the first real chunk using select so the timeout
+        # actually fires (a plain read() blocks indefinitely).
         logger.info(f"    Waiting for first video chunk...")
-        start_time = time.time()
         first_chunk = None
-        
-        while time.time() - start_time < 30:  # 30 second timeout
-            chunk = process.stdout.read(8192)
-            if chunk:
-                first_chunk = chunk
-                elapsed = time.time() - start_time
-                logger.info(f"    Got first chunk after {elapsed:.1f}s ({len(chunk)} bytes)")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([process.stdout], [], [], 1.0)
+            if ready:
+                chunk = process.stdout.read(8192)
+                if chunk:
+                    first_chunk = chunk
+                    elapsed = 30 - (deadline - time.monotonic())
+                    logger.info(f"    Got first chunk after {elapsed:.1f}s ({len(chunk)} bytes)")
+                    break
+            if process.poll() is not None:
                 break
-            time.sleep(0.05)
-        
+
         if not first_chunk:
             logger.error(f"    No data from streamlink after 30 seconds")
-            stderr = process.stderr.read().decode('utf-8', errors='ignore')
-            if stderr:
-                logger.error(f"   Streamlink error: {stderr}")
+            stderr_out = process.stderr.read().decode('utf-8', errors='ignore')
+            if stderr_out:
+                logger.error(f"   Streamlink error: {stderr_out}")
             process.terminate()
             process.wait()
             return
-        
-        # Yield the first chunk
+
         yield first_chunk
-        
-        # Now continue streaming the rest
+
         chunk_count = 1
         try:
             while True:
@@ -2776,13 +2805,13 @@ def proxy_stream(surface_id):
                     logger.info(f"    Stream ended after {chunk_count} chunks")
                     break
                 chunk_count += 1
-                if chunk_count % 1000 == 0:  # Log every 1000 chunks (~8MB)
+                if chunk_count % 1000 == 0:
                     logger.info(f"    Streamed {chunk_count} chunks so far...")
                 yield chunk
         except GeneratorExit:
             logger.info(f"     Client disconnected after {chunk_count} chunks")
-        except Exception as e:
-            logger.error(f"    Streaming error: {e}")
+        except Exception as exc:
+            logger.error(f"    Streaming error: {exc}")
         finally:
             logger.info(f"    Terminating streamlink (streamed {chunk_count} chunks total)")
             process.terminate()
@@ -2791,17 +2820,17 @@ def proxy_stream(surface_id):
             except subprocess.TimeoutExpired:
                 logger.warning(f"     Had to kill streamlink process")
                 process.kill()
-    
+
     return Response(
-        generate(),
+        stream_with_context(generate()),
         mimetype='video/mp2t',
         headers={
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0',
             'Access-Control-Allow-Origin': '*',
-            'Content-Type': 'video/mp2t'
-        }
+            'Content-Type': 'video/mp2t',
+        },
     )
 
 
