@@ -8,15 +8,15 @@ echo " LiveBarn Manager v${APP_VERSION} - Docker Startup"
 echo "=========================================="
 echo ""
 
-# Check credentials first (needed for catalog build)
+# Environment credentials are optional because they can be saved from the admin UI.
 if [ -z "$LIVEBARN_EMAIL" ] || [ -z "$LIVEBARN_PASSWORD" ]; then
-    echo "❌ ERROR: LiveBarn credentials not set!"
-    echo "   Set LIVEBARN_EMAIL and LIVEBARN_PASSWORD environment variables"
-    exit 1
+    echo "⚠️  LiveBarn environment credentials are not set"
+    echo "   Configure them from the admin page or set LIVEBARN_EMAIL and LIVEBARN_PASSWORD"
+    echo ""
+else
+    echo "✅ Environment credentials configured"
+    echo ""
 fi
-
-echo "✅ Credentials configured"
-echo ""
 
 # Check if database exists and has data
 DB_EXISTS=false

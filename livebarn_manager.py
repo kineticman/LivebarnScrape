@@ -26,6 +26,13 @@ import socket
 from apscheduler.schedulers.background import BackgroundScheduler
 import xml.etree.ElementTree as ET 
 
+from credential_store import (
+    clear_saved_credentials,
+    ensure_credentials_schema,
+    get_credential_status,
+    save_credentials,
+)
+from hls_relay import HlsRelayError, iter_hls_stream
 # Import modular schedule providers
 from schedule_providers import ALL_PROVIDERS
 from schedule_utils import group_events_by_surface, fill_gaps_with_open_ice 
@@ -36,6 +43,7 @@ FEED_MODE_IDS = {
     'pano': 4,
     'auto': 5,
 }
+STREAM_PLAYLIST_REFRESH_SECONDS = 10 * 60
 
 # MPEG-TS null packet (PID 0x1FFF) — valid filler ignored by all compliant players.
 # Sent during stream token refresh to keep the player connection alive.
@@ -722,6 +730,83 @@ HTML_TEMPLATE = r"""
             color: #a5b4fc;
         }
 
+        .credentials-card {
+            margin-bottom: 12px;
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(168, 85, 247, 0.55);
+            background: rgba(15, 23, 42, 0.98);
+        }
+
+        .credentials-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .credentials-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            color: #d8b4fe;
+        }
+
+        .credentials-source {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            border: 1px solid rgba(168, 85, 247, 0.55);
+            color: #e9d5ff;
+        }
+
+        .credentials-fields {
+            display: grid;
+            gap: 7px;
+        }
+
+        .credentials-fields label {
+            display: grid;
+            gap: 3px;
+            font-size: 10px;
+            color: #9ca3af;
+        }
+
+        .credentials-fields .input {
+            box-sizing: border-box;
+        }
+
+        .credentials-actions {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 7px;
+            margin-top: 8px;
+        }
+
+        .btn-credentials {
+            padding: 7px 9px;
+            border-radius: 8px;
+            border: 1px solid rgba(168, 85, 247, 0.65);
+            background: rgba(88, 28, 135, 0.55);
+            color: #f3e8ff;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .btn-credentials-secondary {
+            border-color: rgba(148, 163, 184, 0.5);
+            background: rgba(30, 41, 59, 0.8);
+            color: #cbd5e1;
+        }
+
+        .credentials-hint {
+            margin-top: 7px;
+            font-size: 10px;
+            line-height: 1.4;
+            color: #6b7280;
+        }
+
         .favorites-list {
             border-radius: 12px;
             background: rgba(15, 23, 42, 0.96);
@@ -1346,6 +1431,51 @@ HTML_TEMPLATE = r"""
                 </button>
             </div>
 
+            <!-- LiveBarn Credentials -->
+            <div class="credentials-card">
+                <div class="credentials-header">
+                    <div class="credentials-title">LiveBarn Sign-in</div>
+                    <div class="credentials-source" id="credentialSource">Loading...</div>
+                </div>
+                <form id="credentialsForm" onsubmit="saveAdminCredentials(event)" autocomplete="on">
+                    <div class="credentials-fields">
+                        <label>
+                            Email
+                            <input
+                                class="input"
+                                type="email"
+                                id="credentialEmail"
+                                autocomplete="username"
+                                maxlength="320"
+                                required
+                            />
+                        </label>
+                        <label>
+                            Password
+                            <input
+                                class="input"
+                                type="password"
+                                id="credentialPassword"
+                                autocomplete="current-password"
+                                maxlength="4096"
+                                required
+                            />
+                        </label>
+                    </div>
+                    <div class="credentials-actions">
+                        <button class="btn-credentials" type="submit">Save override</button>
+                        <button
+                            class="btn-credentials btn-credentials-secondary"
+                            type="button"
+                            onclick="useEnvironmentCredentials()"
+                        >Use .env</button>
+                    </div>
+                </form>
+                <div class="credentials-hint" id="credentialHint">
+                    Saved overrides are stored in the persistent local database. The password is never displayed.
+                </div>
+            </div>
+
             <!-- Favorites List -->
             <div class="favorites-list">
                 <div id="favoritesListContainer">
@@ -1573,6 +1703,90 @@ HTML_TEMPLATE = r"""
             } catch (err) {
                 console.error("Regenerate error:", err);
                 showToast("Error regenerating playlists", "error");
+            }
+        }
+
+        async function refreshCredentialStatus() {
+            const source = document.getElementById("credentialSource");
+            const hint = document.getElementById("credentialHint");
+            const email = document.getElementById("credentialEmail");
+            try {
+                const response = await fetch("/api/credentials");
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || "Unable to load credential status");
+                }
+
+                const status = data.credentials;
+                source.textContent = status.source === "admin" ? "Admin override" : ".env";
+                email.placeholder = status.email_hint
+                    ? `Current: ${status.email_hint}`
+                    : "name@example.com";
+
+                if (status.configured) {
+                    hint.textContent = `Credentials configured via ${source.textContent}. Password is never displayed.`;
+                } else {
+                    hint.textContent = "No complete credentials are configured for the selected source.";
+                }
+            } catch (err) {
+                console.error("refreshCredentialStatus error:", err);
+                source.textContent = "Unavailable";
+                hint.textContent = err.message;
+            }
+        }
+
+        async function saveAdminCredentials(event) {
+            event.preventDefault();
+            const email = document.getElementById("credentialEmail");
+            const password = document.getElementById("credentialPassword");
+            try {
+                const response = await fetch("/api/credentials", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        source: "admin",
+                        email: email.value.trim(),
+                        password: password.value
+                    })
+                });
+                const data = await response.json();
+                password.value = "";
+                if (!response.ok || !data.success) {
+                    showToast(data.message || "Failed to save credentials", "error");
+                    return;
+                }
+                email.value = "";
+                await refreshCredentialStatus();
+                showToast(data.message, "success");
+            } catch (err) {
+                password.value = "";
+                console.error("saveAdminCredentials error:", err);
+                showToast("Error saving credentials", "error");
+            }
+        }
+
+        async function useEnvironmentCredentials() {
+            if (!window.confirm("Delete the saved credential override and use .env credentials?")) {
+                return;
+            }
+            try {
+                const response = await fetch("/api/credentials", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ source: "environment" })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    showToast(data.message || "Failed to switch credential source", "error");
+                    return;
+                }
+                document.getElementById("credentialEmail").value = "";
+                document.getElementById("credentialPassword").value = "";
+                await refreshCredentialStatus();
+                showToast(data.message, data.credentials.configured ? "success" : "info");
+            } catch (err) {
+                console.error("useEnvironmentCredentials error:", err);
+                showToast("Error switching credential source", "error");
             }
         }
 
@@ -1813,6 +2027,7 @@ HTML_TEMPLATE = r"""
 
         window.addEventListener("DOMContentLoaded", () => {
             refreshFavoritesList();
+            refreshCredentialStatus();
             const playlistUrlElem = document.getElementById("playlistUrl");
             if (playlistUrlElem) {
                 playlistUrlElem.textContent = `http://${serverHost}:${serverPort}/playlist.m3u`;
@@ -1879,6 +2094,7 @@ def ensure_runtime_schema(conn: sqlite3.Connection) -> None:
             cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode TEXT")
         if 'feed_mode_id' not in stream_columns:
             cursor.execute("ALTER TABLE surface_streams ADD COLUMN feed_mode_id INTEGER")
+        ensure_credentials_schema(conn)
         conn.commit()
     finally:
         cursor.close()
@@ -2075,7 +2291,8 @@ def get_stream_info(surface_id):
             ss.venue_name,
             ss.surface_name,
             COALESCE(ss.feed_mode, 'default') as feed_mode,
-            ss.feed_mode_id
+            ss.feed_mode_id,
+            ss.captured_at
         FROM surface_streams ss
         WHERE ss.surface_id = ?
     ''', (surface_id,))
@@ -2090,6 +2307,7 @@ def get_stream_info(surface_id):
             'surface_name': result['surface_name'],
             'feed_mode': normalize_feed_mode(result['feed_mode']),
             'feed_mode_id': result['feed_mode_id'],
+            'captured_at': result['captured_at'],
         }
     return None
 
@@ -2101,11 +2319,19 @@ def _get_stream_info_direct(surface_id: int) -> Optional[Dict]:
     try:
         cursor = conn.cursor()
         cursor.execute(
-            'SELECT playlist_url, feed_mode FROM surface_streams WHERE surface_id = ?',
+            '''
+            SELECT playlist_url, feed_mode, captured_at
+            FROM surface_streams
+            WHERE surface_id = ?
+            ''',
             (surface_id,),
         )
         row = cursor.fetchone()
-        return {'playlist_url': row['playlist_url'], 'feed_mode': row['feed_mode']} if row else None
+        return {
+            'playlist_url': row['playlist_url'],
+            'feed_mode': row['feed_mode'],
+            'captured_at': row['captured_at'],
+        } if row else None
     finally:
         conn.close()
 
@@ -2182,6 +2408,19 @@ def stream_needs_refresh(
 
     match = re.search(r'exp=(\d+)', stream_info['playlist_url'])
     if not match:
+        captured_at = stream_info.get('captured_at')
+        if not captured_at:
+            return True
+        try:
+            captured_datetime = datetime.fromisoformat(captured_at)
+        except (TypeError, ValueError):
+            return True
+        age_seconds = (datetime.now() - captured_datetime).total_seconds()
+        if age_seconds >= STREAM_PLAYLIST_REFRESH_SECONDS:
+            logger.info(
+                f" Playlist is {age_seconds / 60:.0f} minutes old, auto-refreshing..."
+            )
+            return True
         return False
 
     exp_timestamp = int(match.group(1))
@@ -2411,6 +2650,80 @@ def api_get_favorites():
         return jsonify({
             "success": False,
             "message": "Error fetching favorites."
+        }), 500
+
+
+@app.route('/api/credentials', methods=['GET', 'POST'])
+def api_credentials():
+    """Read credential status or choose the persisted/admin or environment source."""
+    try:
+        if request.method == 'GET':
+            return jsonify({
+                "success": True,
+                "credentials": get_credential_status(DB_PATH),
+            })
+
+        data = request.get_json(silent=True) or {}
+        source = str(data.get('source', '')).strip().lower()
+
+        if source == 'environment':
+            clear_saved_credentials(DB_PATH)
+            status = get_credential_status(DB_PATH)
+            logger.info(" LiveBarn credential source changed to environment")
+            if status['configured']:
+                message = "Now using LiveBarn credentials from .env"
+            else:
+                message = "Saved override cleared, but .env credentials are incomplete"
+            return jsonify({
+                "success": True,
+                "message": message,
+                "credentials": status,
+            })
+
+        if source != 'admin':
+            return jsonify({
+                "success": False,
+                "message": "Credential source must be admin or environment.",
+            }), 400
+
+        email = str(data.get('email', '')).strip()
+        password = data.get('password', '')
+        if not isinstance(password, str):
+            password = ''
+        if not email or '@' not in email:
+            return jsonify({
+                "success": False,
+                "message": "Enter a valid LiveBarn email address.",
+            }), 400
+        if not password:
+            return jsonify({
+                "success": False,
+                "message": "Enter the LiveBarn password.",
+            }), 400
+        if len(email) > 320 or len(password) > 4096:
+            return jsonify({
+                "success": False,
+                "message": "Credential value is too long.",
+            }), 400
+
+        save_credentials(DB_PATH, email, password)
+        logger.info(" LiveBarn credential override updated from admin page")
+        return jsonify({
+            "success": True,
+            "message": "LiveBarn credential override saved",
+            "credentials": get_credential_status(DB_PATH),
+        })
+    except sqlite3.OperationalError as exc:
+        logger.error(f"Database error while updating credential settings: {exc}")
+        return jsonify({
+            "success": False,
+            "message": "Database is busy/locked. Please try again.",
+        }), 503
+    except Exception as exc:
+        logger.error(f"Unexpected credential settings error: {exc}")
+        return jsonify({
+            "success": False,
+            "message": "Unexpected server error.",
         }), 500
 
 
@@ -2759,6 +3072,27 @@ def proxy_stream(surface_id):
             f"(requested={requested_mode}, resolved={normalize_feed_mode(si.get('feed_mode'))})"
         )
         logger.info(f"   URL: {playlist_url[:80]}...")
+
+        if 'cdn-akamai-livebarn.akamaized.net' in playlist_url:
+            logger.info("    Launching curl-cffi HLS relay")
+            chunk_count = 0
+            try:
+                for chunk in iter_hls_stream(playlist_url, logger):
+                    chunk_count += 1
+                    yield chunk
+            except GeneratorExit:
+                logger.info(
+                    f"     Client disconnected after {chunk_count} relay chunks"
+                )
+            except HlsRelayError as exc:
+                logger.error(f"    HLS relay error: {exc}")
+            except Exception as exc:
+                logger.error(f"    Unexpected HLS relay error: {exc}")
+            finally:
+                logger.info(
+                    f"    Curl-cffi HLS relay stopped after {chunk_count} chunks"
+                )
+            return
 
         # --- launch streamlink ---
         logger.info(f"    Launching streamlink subprocess")

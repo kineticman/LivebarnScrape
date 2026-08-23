@@ -35,7 +35,10 @@ COPY VERSION .
 COPY livebarn_manager.py .
 COPY build_catalog.py .
 COPY refresh_single.py .
+COPY livebarn_api.py .
+COPY hls_relay.py .
 COPY schedule_utils.py .
+COPY credential_store.py .
 COPY entrypoint.sh .
 
 # Copy schedule providers module

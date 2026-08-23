@@ -258,13 +258,17 @@ See existing providers in `schedule_providers/` for complete examples.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LIVEBARN_EMAIL` | *required* | LiveBarn account email |
-| `LIVEBARN_PASSWORD` | *required* | LiveBarn account password |
+| `LIVEBARN_EMAIL` | optional | LiveBarn account email; used when no admin override is saved |
+| `LIVEBARN_PASSWORD` | optional | LiveBarn account password; used when no admin override is saved |
 | `LAN_IP` | auto-detect | Server's LAN IP address |
 | `SERVER_PORT` | 5000 | Port the web server listens on (and external port in Docker/Portainer examples) |
 | `PUBLIC_PORT` | auto | Public/external port used in generated URLs (defaults to `SERVER_PORT`) |
 | `LOG_LEVEL` | INFO | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `DB_PATH` | /data/livebarn.db | SQLite database path |
+
+Credentials can also be saved from the **LiveBarn Sign-in** card on the web admin page. A saved admin override takes precedence over environment variables and persists in the SQLite database. Select **Use .env** to delete the saved override and return to `LIVEBARN_EMAIL`/`LIVEBARN_PASSWORD`. The UI never returns the saved password; keep the admin page restricted to a trusted network.
+
+Stream refreshes use LiveBarn's playback API through `curl-cffi`. The first sign-in uses a short browser-assisted Auth0 step because LiveBarn protects it with AWS WAF; its DPoP-bound access token is then cached in `/data/livebarn.db` for roughly 12 hours. Legacy accounts may first need to sign in successfully at `https://watch.livebarn.com` in a normal browser and complete any migration or CAPTCHA prompts shown there.
 
 ### Port Mapping
 
@@ -282,6 +286,7 @@ See existing providers in `schedule_providers/` for complete examples.
 | `/api/venues` | GET | List all venues |
 | `/api/favorites` | GET | List favorite surfaces |
 | `/api/favorites` | POST | Add surface to favorites |
+| `/api/credentials` | GET, POST | Read credential status or change the active credential source |
 | `/api/favorites/<id>` | DELETE | Remove surface from favorites |
 | `/api/refresh-all` | POST | Refresh all favorite streams |
 | `/api/refresh-surface/<id>` | POST | Refresh single surface stream |
@@ -319,7 +324,7 @@ The container automatically builds the venue catalog on first startup. If the ca
 ### No Streams Available
 
 1. **Verify credentials** are correct
-2. **Check LiveBarn website** - can you log in normally?
+2. **Check LiveBarn website** - sign in once to complete any account migration or CAPTCHA
 3. **Refresh streams** manually via web UI
 4. **Check logs** for authentication errors
 
