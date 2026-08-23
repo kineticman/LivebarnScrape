@@ -11,6 +11,13 @@ env/
 
 # --- Local config / secrets ---
 .env
+.env.*
+!.env.example
+.claude/
+livebarn_credentials.json
+*.har
+*.pem
+*.key
 
 # --- Local data / runtime files ---
 data/
@@ -24,6 +31,8 @@ logs/
 *.tmp
 *.bak
 dev/
+*.m3u
+*.xml
 
 # --- OS / editor junk ---
 .DS_Store

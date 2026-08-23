@@ -1,113 +1,70 @@
-# LiveBarn Docker - Quick Start
+# LiveBarn Manager Quick Start
 
-## 🚀 5-Minute Setup
+## Start the Container
 
-### Step 1: Download Files
-Put all these files in a directory:
-- `Dockerfile`
-- `docker-compose.yml`
-- `requirements.txt`
-- `livebarn_manager.py`
-- `build_catalog.py`
-- `refresh_single.py`
-- `entrypoint.sh`
-- `.env.example`
+Clone the repository, create local configuration, and build the service:
 
-### Step 2: Configure Credentials
 ```bash
+git clone https://github.com/kineticman/LivebarnScrape.git
+cd LivebarnScrape
 cp .env.example .env
-nano .env
+docker compose up -d --build
 ```
 
-Add your LiveBarn credentials:
-```
-LIVEBARN_EMAIL=your-email@example.com
-LIVEBARN_PASSWORD=your-password-here
-```
+Set `LAN_IP` in `.env` to the address DVR clients use. `SERVER_PORT`
+controls the host port and defaults to `5000`. The initial startup downloads the
+venue catalog automatically and may take a minute or two.
 
-### Step 3: Start Container
-```bash
-docker-compose up -d
-```
+Open `http://YOUR_SERVER_IP:5000`, then add favorite surfaces. In the
+**LiveBarn Sign-in** card, save account credentials or choose **Use .env** to
+use `LIVEBARN_EMAIL` and `LIVEBARN_PASSWORD` from `.env`. Saved credentials
+take precedence and remain in the local SQLite database.
 
-### Step 4: Build Catalog (First Time Only)
-```bash
-docker exec livebarn-manager python build_catalog.py
-```
+## Secure the Admin Page
 
-### Step 5: Open Web UI
-Go to: `http://localhost:5000`
+Set these values in `.env` to require HTTP Basic authentication for the admin
+UI and `/api/*` routes:
 
-- Browse venues
-- Click a venue to see surfaces
-- Star (⭐) your favorite surfaces
-
-### Step 6: Add to Channels DVR
-
-In Channels DVR → Sources → Custom Channels:
-
-**M3U Playlist:**
-```
-http://YOUR_SERVER_IP:5000/playlist.m3u
+```dotenv
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=choose-a-strong-password
 ```
 
-**XMLTV Guide:**
+When `ADMIN_PASSWORD` is empty, admin routes remain open for compatibility.
+The DVR-facing playlist, guide, and proxy URLs never require this Basic-auth
+login.
+
+## Configure a DVR Client
+
+Add these URLs to Channels DVR or another compatible client:
+
+```text
+M3U:   http://YOUR_SERVER_IP:5000/playlist.m3u
+XMLTV: http://YOUR_SERVER_IP:5000/xmltv
 ```
-http://YOUR_SERVER_IP:5000/xmltv
-```
 
-## ✅ Done!
+The first playback after sign-in may take several seconds while authentication
+finishes. Later playback reuses the cached session until it approaches expiry.
 
-Your streams will now appear in Channels DVR with:
-- ✅ Real event schedules from Chiller (if applicable)
-- ✅ Auto-refreshing stream tokens
-- ✅ Live EPG data
-
-## 📋 Useful Commands
+## Useful Commands
 
 ```bash
-# View logs
-docker-compose logs -f
-
-# Restart
-docker-compose restart
-
-# Stop
-docker-compose down
-
-# Update (pull changes)
-docker-compose build
-docker-compose up -d
+docker compose logs -f          # Follow application and sign-in logs
+docker compose restart          # Restart without rebuilding
+docker compose up -d --build    # Rebuild after an update
+docker compose down             # Stop and remove the container
 ```
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
-**No streams appearing?**
-- Make sure you ran `build_catalog.py`
-- Add favorites in the web UI (star icon)
+- No venues: wait for the initial catalog build, then inspect startup logs.
+- No channels: add at least one favorite surface in the admin page.
+- Sign-in fails: sign in once at `watch.livebarn.com` to resolve any account
+  migration or CAPTCHA, then retry from the admin page.
+- Playback fails: check `docker compose logs -f` for OAuth, playlist, or relay
+  errors and confirm the subscription can view that surface in LiveBarn.
+- Wrong generated port: set `SERVER_PORT` to the published host port and
+  restart the container.
 
-**Container won't start?**
-- Check `.env` file has correct credentials
-- View logs: `docker-compose logs`
-
-**Streams not playing?**
-- First access triggers token capture (takes 5-10 seconds)
-- Check logs for Playwright/Chrome errors
-
-## 🎯 What's New vs Old Setup
-
-### ✅ Improvements:
-- **No manual token refresh needed** - happens on-demand
-- **Lighter weight** - only refreshes when you watch
-- **Better Chiller integration** - automatic 3am daily refresh
-- **Environment variables** - no more JSON config files
-- **Single container** - everything in one place
-
-### 🗑️ Removed:
-- `auto_refresh.py` - no longer needed
-- `capture_favorites.py` - no longer needed  
-- `generate_xmltv.py` - built into manager now
-
-## 📚 More Info
-
-See `README.md` for complete documentation.
+See the repository `README.md` for configuration and provider-development
+details.

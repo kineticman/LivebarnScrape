@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   livebarn:
     build: .
@@ -12,9 +10,13 @@ services:
       - "${SERVER_PORT:-5000}:5000"
 
     environment:
-      # LiveBarn Credentials (REQUIRED)
+      # Optional environment fallback; credentials can also be saved in the UI.
       - LIVEBARN_EMAIL=${LIVEBARN_EMAIL}
       - LIVEBARN_PASSWORD=${LIVEBARN_PASSWORD}
+
+      # Optional HTTP Basic authentication for the admin UI and /api/* routes.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
 
       # Network Configuration (IMPORTANT - Set your LAN IP!)
       - LAN_IP=${LAN_IP:-192.168.1.100}  # Change to your server's LAN IP

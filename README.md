@@ -11,7 +11,7 @@ A Docker-based application that creates a unified streaming interface for LiveBa
   - Lou & Gib Reese Ice Arena (LGRIA)
 - 🔄 **Auto-Refresh**: Daily schedule updates at 3:00 AM
 - 🌐 **Web UI**: Manage favorites and view streams through a clean web interface
-- 🔗 **Streamlink Proxy**: Direct video streaming without tokens expiring
+- 🔗 **HLS Relay**: Direct `curl-cffi` streaming with Streamlink fallback
 
 ## Screenshots
 
@@ -45,8 +45,10 @@ The web interface allows you to:
 
    | Variable | Value | Description |
    |----------|-------|-------------|
-   | `LIVEBARN_EMAIL` | your@email.com | Your LiveBarn account email |
-   | `LIVEBARN_PASSWORD` | yourpassword | Your LiveBarn account password |
+   | `LIVEBARN_EMAIL` | your@email.com | Optional credential fallback; credentials can be saved in the UI |
+   | `LIVEBARN_PASSWORD` | yourpassword | Optional credential fallback; credentials can be saved in the UI |
+   | `ADMIN_USERNAME` | admin | Basic-auth username for the admin UI |
+   | `ADMIN_PASSWORD` | strong password | Enables Basic auth when non-empty |
    | `LAN_IP` | 192.168.1.100 | Your server's LAN IP (optional, auto-detected) |
    | `SERVER_PORT` | 5000 | **External** web interface port (optional, default: 5000) |
    | `LOG_LEVEL` | INFO | Logging level (optional, default: INFO) |
@@ -76,25 +78,20 @@ The web interface allows you to:
    cd LivebarnScrape
    ```
 
-2. **Create `.env` file:**
+2. **Create and edit `.env`:**
    ```bash
-   cat > .env << EOF
-   LIVEBARN_EMAIL=your@email.com
-   LIVEBARN_PASSWORD=yourpassword
-   LAN_IP=192.168.1.100
-   SERVER_PORT=5000   # External port you’ll use in the browser/M3U/XMLTV URLs
-   LOG_LEVEL=INFO
-   EOF
+   cp .env.example .env
+   nano .env
    ```
 
 3. **Start the container:**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 4. **View logs:**
    ```bash
-   docker-compose logs -f
+   docker compose logs -f
    ```
 
 ### Option 3: Docker Run (Manual)
@@ -205,10 +202,9 @@ The system uses a **modular provider architecture** to automatically fetch sched
 
 The system uses a **modular provider architecture** that makes adding new rinks simple:
 
-1. **Copy the provider template:**
-   ```bash
-   cp schedule_providers/example_provider.py schedule_providers/your_rink_provider.py
-   ```
+1. **Create `schedule_providers/your_rink_provider.py`:** use
+   `base_provider.py` for the interface and an existing provider as a working
+   example.
 
 2. **Implement 3 methods:**
    - `name` - Display name for your rink
@@ -220,12 +216,12 @@ The system uses a **modular provider architecture** that makes adding new rinks 
 
 4. **Restart the container:**
    ```bash
-   docker-compose restart
+   docker compose restart
    ```
 
 **That's it!** No changes to core code needed.
 
-📖 **Detailed guide:** See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for step-by-step instructions and examples.
+📖 **Detailed guide:** See [docs/ADDING_PROVIDERS.md](docs/ADDING_PROVIDERS.md) for step-by-step instructions and examples.
 
 ### Example: Adding a New Rink
 
@@ -260,13 +256,15 @@ See existing providers in `schedule_providers/` for complete examples.
 |----------|---------|-------------|
 | `LIVEBARN_EMAIL` | optional | LiveBarn account email; used when no admin override is saved |
 | `LIVEBARN_PASSWORD` | optional | LiveBarn account password; used when no admin override is saved |
+| `ADMIN_USERNAME` | admin | HTTP Basic-auth username for admin routes |
+| `ADMIN_PASSWORD` | empty | Enables HTTP Basic auth for admin routes when set |
 | `LAN_IP` | auto-detect | Server's LAN IP address |
 | `SERVER_PORT` | 5000 | Port the web server listens on (and external port in Docker/Portainer examples) |
 | `PUBLIC_PORT` | auto | Public/external port used in generated URLs (defaults to `SERVER_PORT`) |
 | `LOG_LEVEL` | INFO | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `DB_PATH` | /data/livebarn.db | SQLite database path |
 
-Credentials can also be saved from the **LiveBarn Sign-in** card on the web admin page. A saved admin override takes precedence over environment variables and persists in the SQLite database. Select **Use .env** to delete the saved override and return to `LIVEBARN_EMAIL`/`LIVEBARN_PASSWORD`. The UI never returns the saved password; keep the admin page restricted to a trusted network.
+Credentials can also be saved from the **LiveBarn Sign-in** card on the web admin page. A saved admin override takes precedence over environment variables and persists in the SQLite database. Select **Use .env** to delete the saved override and return to `LIVEBARN_EMAIL`/`LIVEBARN_PASSWORD`. The UI never returns the saved password. Set `ADMIN_PASSWORD` to protect the admin UI, venue/favorite actions, and `/api/*` routes with HTTP Basic authentication. Playlist, XMLTV, health, and stream-proxy routes remain open for DVR clients.
 
 Stream refreshes use LiveBarn's playback API through `curl-cffi`. The first sign-in uses a short browser-assisted Auth0 step because LiveBarn protects it with AWS WAF; its DPoP-bound access token is then cached in `/data/livebarn.db` for roughly 12 hours. Legacy accounts may first need to sign in successfully at `https://watch.livebarn.com` in a normal browser and complete any migration or CAPTCHA prompts shown there.
 
@@ -282,17 +280,21 @@ Stream refreshes use LiveBarn's playback API through `curl-cffi`. The first sign
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Web interface |
-| `/api/venues` | GET | List all venues |
+| `/` | GET | Admin web interface |
 | `/api/favorites` | GET | List favorite surfaces |
-| `/api/favorites` | POST | Add surface to favorites |
-| `/api/credentials` | GET, POST | Read credential status or change the active credential source |
-| `/api/favorites/<id>` | DELETE | Remove surface from favorites |
-| `/api/refresh-all` | POST | Refresh all favorite streams |
-| `/api/refresh-surface/<id>` | POST | Refresh single surface stream |
+| `/api/favorites/<id>` | POST | Toggle a favorite surface |
+| `/api/favorites/<id>/mode` | POST | Set the preferred camera mode |
+| `/api/favorites/<id>/pin` | POST | Save or clear a surface PIN |
+| `/api/credentials` | GET, POST | Read credential status or change the credential source |
+| `/api/logs` | GET | Read recent application logs |
+| `/api/regenerate` | POST | Refresh schedule and export data |
 | `/playlist.m3u` | GET | M3U playlist of favorites |
 | `/xmltv` | GET | XMLTV EPG data |
-| `/stream/<surface_id>` | GET | Direct HLS stream proxy |
+| `/proxy/<surface_id>` | GET | MPEG-TS stream proxy |
+| `/health` | GET | Container health and version |
+
+Admin endpoints require HTTP Basic authentication only when `ADMIN_PASSWORD`
+is configured.
 
 ## Troubleshooting
 
@@ -346,7 +348,7 @@ docker logs livebarn-manager | grep "Lou & Gib Reese"
 ```
 
 **Add a new provider:**
-- See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for complete guide
+- See [docs/ADDING_PROVIDERS.md](docs/ADDING_PROVIDERS.md) for complete guide
 - Providers are in `schedule_providers/` directory
 - No core code changes needed
 
@@ -368,16 +370,20 @@ LivebarnScrape/
 │   ├── __init__.py              # Provider registry
 │   ├── base_provider.py         # Abstract base class
 │   ├── chiller_provider.py      # OhioHealth Chiller
-│   ├── lgria_provider.py        # Lou & Gib Reese
-│   └── example_provider.py      # Template for new providers
+│   └── lgria_provider.py        # Lou & Gib Reese
 ├── build_catalog.py              # Venue catalog builder
 ├── refresh_single.py             # Single stream refresh utility
+├── livebarn_api.py               # OAuth and playback API client
+├── hls_relay.py                  # curl-cffi HLS-to-MPEG-TS relay
+├── credential_store.py           # SQLite-backed credential settings
+├── tests/                        # Unit tests
+├── docs/                         # User and provider guides
 ├── Dockerfile                    # Container image definition
 ├── docker-compose.yml            # Docker Compose configuration
 ├── entrypoint.sh                 # Container startup script
 ├── requirements.txt              # Python dependencies
 ├── README.md                     # This file
-└── ADDING_PROVIDERS.md           # Guide for adding new rinks
+└── AGENTS.md                     # Contributor guidance
 ```
 
 ### Local Development
@@ -425,7 +431,7 @@ docker build -t livebarn-manager .
 Contributions are welcome! The modular architecture makes it easy to contribute:
 
 ### Easy Contributions:
-- ✅ **Add schedule providers** for new rinks (see [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md))
+- ✅ **Add schedule providers** for new rinks (see [docs/ADDING_PROVIDERS.md](docs/ADDING_PROVIDERS.md))
 - ✅ **Improve existing providers** with better parsing or error handling
 - ✅ **Add tests** for providers or core functionality
 
@@ -445,11 +451,11 @@ The easiest way to contribute is by adding support for your local rink:
 
 1. Fork the repository
 2. Create a new provider in `schedule_providers/`
-3. Follow the template in `example_provider.py`
+3. Implement `ScheduleProvider`, following an existing provider as an example
 4. Test it locally
 5. Submit a pull request
 
-See [ADDING_PROVIDERS.md](ADDING_PROVIDERS.md) for detailed instructions.
+See [docs/ADDING_PROVIDERS.md](docs/ADDING_PROVIDERS.md) for detailed instructions.
 
 Please open an issue or pull request on GitHub.
 

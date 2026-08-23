@@ -6,7 +6,6 @@ Downloads complete venue/surface database from LiveBarn API
 
 import requests
 import sqlite3
-import json
 import os
 from pathlib import Path
 from datetime import datetime
@@ -22,7 +21,7 @@ def build_catalog():
     print("=" * 70)
     print()
     
-    print(f"📡 Fetching venue database from LiveBarn API...")
+    print("📡 Fetching venue database from LiveBarn API...")
     print(f"   URL: {API_URL}")
     
     try:
@@ -103,7 +102,7 @@ def build_catalog():
         )
     ''')
 
-    print(f"\n💾 Importing venues into database...")
+    print("\n💾 Importing venues into database...")
     
     venues_imported = 0
     surfaces_imported = 0
@@ -217,7 +216,7 @@ def build_catalog():
         
     conn.close()
     
-    print(f"\n✅ Catalog built successfully!")
+    print("\n✅ Catalog built successfully!")
     print(f"   Venues: {total_venues}")
     print(f"   Surfaces: {total_surfaces}")
     print(f"   Favorites: {total_favorites}")
@@ -235,7 +234,7 @@ if __name__ == '__main__':
     if success:
         print("\n🎉 You can now:")
         print("   1. Run livebarn_manager.py to browse and manage favorites")
-        print("   2. Run auto_refresh.py to capture streams for favorites")
+        print("   2. Open a favorite stream to refresh it on demand")
         sys.exit(0)
     else:
         print("\n❌ Catalog build failed")

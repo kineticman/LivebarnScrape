@@ -5,7 +5,6 @@ Used by livebarn_manager.py for mode-aware on-demand refresh.
 """
 
 import asyncio
-import json
 import os
 import sqlite3
 import sys
@@ -57,21 +56,8 @@ def ensure_runtime_schema(conn: sqlite3.Connection) -> None:
 
 
 def get_credentials():
-    """Get credentials from the admin override, environment, or legacy JSON."""
-    try:
-        return resolve_credentials(DB_PATH)
-    except ValueError:
-        pass
-
-    creds_file = Path(__file__).parent / 'livebarn_credentials.json'
-    if creds_file.exists():
-        with open(creds_file) as f:
-            return json.load(f)
-
-    raise ValueError(
-        "No credentials found. Save them in the admin page or set "
-        "LIVEBARN_EMAIL and LIVEBARN_PASSWORD environment variables."
-    )
+    """Get credentials from the admin override or environment."""
+    return resolve_credentials(DB_PATH)
 
 
 def get_surface_details(surface_id: int) -> tuple[str, str, str, str | None]:

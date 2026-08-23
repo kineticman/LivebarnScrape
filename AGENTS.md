@@ -9,6 +9,7 @@ The application is a Python 3.11 Flask service centered on `livebarn_manager.py`
 - `python -m venv .venv && . .venv/bin/activate` creates and activates a local environment.
 - `pip install -r requirements.txt` installs Flask, Playwright, Streamlink, and scheduling dependencies. For browser-based tools, also run `playwright install chromium`.
 - `python -m compileall -q .` performs the current lightweight syntax check.
+- `python -m unittest discover -s tests -v` runs the committed unit tests.
 - `docker compose config` validates Compose configuration.
 - `docker compose build` builds the production-style image.
 - `docker compose up -d` starts the service at `http://localhost:${SERVER_PORT:-5000}`; use `docker compose logs -f` to inspect startup and scraping failures.
@@ -19,7 +20,7 @@ Use four-space indentation and standard PEP 8 naming: `snake_case` for functions
 
 ## Testing Guidelines
 
-There is currently no committed automated test suite or coverage threshold. Before submitting, run the compile and Compose checks above, then smoke-test affected UI/API routes and playlist/XMLTV output. Provider changes should verify date parsing, surface mappings, empty responses, and upstream failures. Add future tests under `tests/` using names such as `test_schedule_utils.py` and functions named `test_<behavior>`.
+Tests use Python's `unittest` framework; no coverage threshold is enforced. Before submitting, run the unit, compile, and Compose checks above, then smoke-test affected UI/API routes and playlist/XMLTV output. Provider changes should verify date parsing, surface mappings, empty responses, and upstream failures. Add tests under `tests/` using names such as `test_schedule_utils.py` and methods named `test_<behavior>`.
 
 ## Commit & Pull Request Guidelines
 

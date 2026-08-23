@@ -5,15 +5,14 @@ Browse venues, manage favorites, auto-capture streams
 """
 
 import select
+import secrets
 import sqlite3
 import subprocess
 import sys
 import logging
-import json
 import time
 import os
 import re
-import requests
 import signal
 import atexit
 import threading
@@ -62,7 +61,7 @@ def sanitize_title_for_filesystem(text: str) -> str:
     create invalid filesystem paths on Windows/exFAT.
 
     - Replaces control characters (including tabs/newlines) with a space
-    - Replaces Windows-invalid path characters: \/:*?"<>|
+    - Replaces Windows-invalid path characters: \\/:*?"<>|
     - Collapses multiple spaces
     """
     if not text:
@@ -184,8 +183,8 @@ SERVER_PORT = int(os.getenv('SERVER_PORT', '5000'))
 # Defaults to SERVER_PORT so bare-metal runs don't need extra config.
 PUBLIC_PORT = int(os.getenv('PUBLIC_PORT', str(SERVER_PORT)))
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
-LIVEBARN_EMAIL = os.getenv('LIVEBARN_EMAIL')
-LIVEBARN_PASSWORD = os.getenv('LIVEBARN_PASSWORD')
+ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
 
 # Set log level from environment first
 logging.getLogger().setLevel(getattr(logging, LOG_LEVEL.upper(), logging.INFO))
@@ -272,8 +271,6 @@ def refresh_schedule():
     Background job to refresh schedule data from all providers
     Uses modular provider system - automatically fetches from all enabled providers
     """
-    global SCHEDULE_CACHE
-    
     try:
         logger.info(" Refreshing schedules from all providers...")
         
@@ -2453,6 +2450,47 @@ def build_proxy_url(surface_id: int, feed_mode: str) -> str:
 
 # --- Flask Routes ---
 
+
+def _is_admin_route(path: str) -> bool:
+    """Return whether a request targets the browser-based administration UI."""
+    return (
+        path == '/'
+        or path == '/toggle_favorite'
+        or path.startswith('/venue/')
+        or path.startswith('/api/')
+    )
+
+
+@app.before_request
+def require_admin_auth():
+    """Optionally protect admin routes while keeping DVR endpoints accessible."""
+    if not ADMIN_PASSWORD or not _is_admin_route(request.path):
+        return None
+
+    auth = request.authorization
+    username_matches = bool(
+        auth
+        and secrets.compare_digest(auth.username or '', ADMIN_USERNAME)
+    )
+    password_matches = bool(
+        auth
+        and secrets.compare_digest(auth.password or '', ADMIN_PASSWORD)
+    )
+    if username_matches and password_matches:
+        return None
+
+    return Response(
+        'Authentication required.',
+        401,
+        {'WWW-Authenticate': 'Basic realm="LiveBarn Admin"'},
+    )
+
+
+@app.route('/health')
+def health():
+    """Unauthenticated container health endpoint."""
+    return jsonify({'status': 'ok', 'version': APP_VERSION})
+
 @app.route('/')
 def index():
     """Main page to list venues, search, filter, and show favorites."""
@@ -2626,7 +2664,7 @@ def api_set_favorite_pin(surface_id):
     try:
         if not set_pin_code(surface_id, pin_code):
             return jsonify({"success": False, "message": "Favorite not found."}), 404
-        msg = f"PIN saved" if pin_code else "PIN cleared"
+        msg = "PIN saved" if pin_code else "PIN cleared"
         return jsonify({"success": True, "message": msg})
     except sqlite3.OperationalError as e:
         logger.error(f"Database error during API set_favorite_pin: {e}")
@@ -2848,8 +2886,6 @@ def xmltv_endpoint():
     
     # Use cached schedule data from all providers
     events_by_surface = SCHEDULE_CACHE.get('events_by_surface', {})
-    last_updated = SCHEDULE_CACHE.get('last_updated')
-    
     # Create root TV element
     tv = ET.Element('tv')
     tv.set('generator-info-name', f'LiveBarn Manager v{APP_VERSION} + Chiller')
@@ -3095,7 +3131,7 @@ def proxy_stream(surface_id):
             return
 
         # --- launch streamlink ---
-        logger.info(f"    Launching streamlink subprocess")
+        logger.info("    Launching streamlink subprocess")
         process = subprocess.Popen(
             ['streamlink', '--stdout', '--loglevel', 'error', playlist_url, 'best'],
             stdout=subprocess.PIPE,
@@ -3105,7 +3141,7 @@ def proxy_stream(surface_id):
 
         # PRE-BUFFER: wait for the first real chunk using select so the timeout
         # actually fires (a plain read() blocks indefinitely).
-        logger.info(f"    Waiting for first video chunk...")
+        logger.info("    Waiting for first video chunk...")
         first_chunk = None
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -3121,7 +3157,7 @@ def proxy_stream(surface_id):
                 break
 
         if not first_chunk:
-            logger.error(f"    No data from streamlink after 30 seconds")
+            logger.error("    No data from streamlink after 30 seconds")
             stderr_out = process.stderr.read().decode('utf-8', errors='ignore')
             if stderr_out:
                 logger.error(f"   Streamlink error: {stderr_out}")
@@ -3152,7 +3188,7 @@ def proxy_stream(surface_id):
             try:
                 process.wait(timeout=2)
             except subprocess.TimeoutExpired:
-                logger.warning(f"     Had to kill streamlink process")
+                logger.warning("     Had to kill streamlink process")
                 process.kill()
 
     return Response(
@@ -3177,7 +3213,7 @@ def init_db_if_needed():
     """
     if not DB_PATH.exists():
         logger.warning(f"  Database file does not exist at: {DB_PATH}")
-        logger.warning(f"  Please run build_catalog.py first to create the database")
+        logger.warning("  Please run build_catalog.py first to create the database")
         return
     
     conn = sqlite3.connect(DB_PATH)
@@ -3198,7 +3234,7 @@ def init_db_if_needed():
     
     if missing:
         logger.warning(f"  The following required tables are missing: {missing}")
-        logger.warning(f"  Please run build_catalog.py to create missing tables")
+        logger.warning("  Please run build_catalog.py to create missing tables")
     else:
         logger.info(" All expected tables found in database")
         

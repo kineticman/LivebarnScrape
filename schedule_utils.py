@@ -7,23 +7,6 @@ from typing import List, Dict, Tuple
 from schedule_providers import ScheduleEvent
 
 
-def events_to_legacy_format(events: List[ScheduleEvent]) -> List[Dict[str, str]]:
-    """
-    Convert ScheduleEvent objects to legacy dict format for backward compatibility
-    Legacy format: {"start_date": "2025-12-03 09:00:00.0", "end_date": "...", "text": "..."}
-    """
-    legacy_events = []
-    
-    for event in events:
-        legacy_events.append({
-            "start_date": event.start_time.strftime("%Y-%m-%d %H:%M:%S.0"),
-            "end_date": event.end_time.strftime("%Y-%m-%d %H:%M:%S.0"),
-            "text": event.title
-        })
-    
-    return legacy_events
-
-
 def group_events_by_surface(events: List[ScheduleEvent]) -> Dict[int, List[Dict[str, str]]]:
     """
     Group events by surface_id and convert to legacy format

@@ -21,7 +21,8 @@ API_ROOT = f"{API_ORIGIN}/api/v2.0.0"
 WATCH_ORIGIN = "https://watch.livebarn.com"
 REDIRECT_URL = f"{WATCH_ORIGIN}/authorize"
 OAUTH_BASIC_TOKEN = "{{LBW_OAUTH_BASIC_TOKEN}}"
-HLS_ACCESS_TOKEN = "e00e2487-cc76-4718-8153-3ce565933dd2"
+# Public client identifier embedded in LiveBarn's web player, not a user secret.
+HLS_CLIENT_TOKEN = "e00e2487-cc76-4718-8153-3ce565933dd2"
 TOKEN_EXPIRY_SKEW_SECONDS = 120
 
 
@@ -387,7 +388,7 @@ class LiveBarnClient:
                 "ip": live["dns"],
             },
             headers={
-                "X-LB-ACCESS-TOKEN": HLS_ACCESS_TOKEN,
+                "X-LB-ACCESS-TOKEN": HLS_CLIENT_TOKEN,
                 "X-LB-STREAMING-TOKEN": live["streamingToken"],
                 "X-LB-USER-ID": self.user_id,
             },

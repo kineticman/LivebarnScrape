@@ -4,8 +4,9 @@ The schedule system is now modular! Adding a new rink is easy and requires NO ch
 
 ## Quick Start
 
-1. Copy `schedule_providers/example_provider.py` to `schedule_providers/your_rink_provider.py`
-2. Follow the TODOs in the file to implement:
+1. Create `schedule_providers/your_rink_provider.py`, using
+   `base_provider.py` for the interface and an existing provider as an example.
+2. Implement:
    - Schedule URL/API endpoint
    - Surface ID mappings
    - fetch_schedule() logic
@@ -23,8 +24,7 @@ schedule_providers/
 ├── base_provider.py           # Abstract base class
 ├── chiller_provider.py        # OhioHealth Chiller (example)
 ├── lgria_provider.py          # LGRIA (example)
-├── example_provider.py        # Template for new providers
-└── your_rink_provider.py      # Your new provider!
+└── your_rink_provider.py      # Your new provider
 ```
 
 ## Step-by-Step Example
@@ -155,7 +155,7 @@ __all__ = [
 ### Step 3: Restart Container
 
 ```bash
-docker-compose restart
+docker compose restart
 ```
 
 That's it! The logs will now show:
