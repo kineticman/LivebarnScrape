@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import tempfile
 import unittest
@@ -53,6 +54,31 @@ class AdminAuthTests(unittest.TestCase):
 
         self.assertIsNone(response)
 
+
+class LogPollFilterTests(unittest.TestCase):
+    @staticmethod
+    def _record(message):
+        return logging.LogRecord(
+            name="werkzeug",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg=message,
+            args=(),
+            exc_info=None,
+        )
+
+    def test_successful_local_healthcheck_is_suppressed(self):
+        record = self._record(
+            '127.0.0.1 - - [24/Aug/2026] "GET /health HTTP/1.1" 200 -'
+        )
+        self.assertFalse(livebarn_manager.LogPollFilter().filter(record))
+
+    def test_failed_healthcheck_remains_visible(self):
+        record = self._record(
+            '127.0.0.1 - - [24/Aug/2026] "GET /health HTTP/1.1" 500 -'
+        )
+        self.assertTrue(livebarn_manager.LogPollFilter().filter(record))
 
 if __name__ == "__main__":
     unittest.main()

@@ -151,11 +151,15 @@ class LogPollFilter(logging.Filter):
     """Filter out polling and health check requests to avoid log pollution"""
     def filter(self, record):
         message = record.getMessage()
-        # Exclude polling requests and health checks from logs
+        # Exclude high-frequency UI polling requests.
         if 'GET /api/logs' in message or 'GET /api/favorites' in message:
             return False
-        # Filter health check requests (every 30s from Docker)
-        if 'GET / HTTP' in message and '127.0.0.1' in message:
+        # Suppress successful Docker healthchecks while preserving failures.
+        if (
+            '127.0.0.1' in message
+            and 'GET /health HTTP' in message
+            and ' 200 ' in message
+        ):
             return False
         return True
 
