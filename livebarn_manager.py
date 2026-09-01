@@ -54,6 +54,14 @@ FEED_MODE_LABELS = {
     'both': 'Both',
 }
 APP_VERSION = (Path(__file__).with_name('VERSION').read_text(encoding='utf-8').strip() or 'dev')
+DEFAULT_CHANNEL_LOGO_URL = (
+    'https://kineticman.github.io/LivebarnScrape/assets/livebarn-hockey-logo.png'
+)
+
+
+def get_default_channel_logo_url() -> str:
+    """Return the public GitHub Pages URL for the shared hockey channel logo."""
+    return DEFAULT_CHANNEL_LOGO_URL
 
 def sanitize_title_for_filesystem(text: str) -> str:
     """
@@ -2864,6 +2872,7 @@ def generate_playlist():
                 f'channel-number="{variant["channel_number"]}" '
                 f'tvg-id="{variant["channel_id"]}" '
                 f'tvg-name="{title}" '
+                f'tvg-logo="{get_default_channel_logo_url()}" '
                 f'group-title="LiveBarn" '
                 f'tvc-guide-title="{guide_title}" '
                 f'tvc-guide-description="{description}" '
@@ -2929,7 +2938,7 @@ def xmltv_endpoint():
                 display_name_loc.text = sanitize_channel_name(location_str)
 
             icon = ET.SubElement(channel, 'icon')
-            icon.set('src', 'https://www.thechiller.com/assets/images/logo_300.png')
+            icon.set('src', get_default_channel_logo_url())
     
     # Create programs
     for fav in favorites:

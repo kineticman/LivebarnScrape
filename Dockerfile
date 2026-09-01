@@ -37,6 +37,7 @@ COPY hls_relay.py .
 COPY schedule_utils.py .
 COPY credential_store.py .
 COPY entrypoint.sh .
+COPY static/ /app/static/
 
 # Copy schedule providers module
 COPY schedule_providers/ /app/schedule_providers/
