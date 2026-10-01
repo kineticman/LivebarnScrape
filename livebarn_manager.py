@@ -24,6 +24,7 @@ from pathlib import Path
 import socket
 from apscheduler.schedulers.background import BackgroundScheduler
 import xml.etree.ElementTree as ET 
+from urllib.parse import parse_qs, urlparse
 
 from credential_store import (
     clear_saved_credentials,
@@ -3120,9 +3121,16 @@ def proxy_stream(surface_id):
             f" Streaming surface_id={surface_id}: {stream_name} "
             f"(requested={requested_mode}, resolved={normalize_feed_mode(si.get('feed_mode'))})"
         )
-        logger.info(f"   URL: {playlist_url[:80]}...")
+        parsed_playlist = urlparse(playlist_url)
+        signed_url = bool(parse_qs(parsed_playlist.query).get('hdnts'))
+        logger.info(
+            "   Playback host=%s signed_hls=%s",
+            parsed_playlist.hostname, signed_url,
+        )
 
-        if 'cdn-akamai-livebarn.akamaized.net' in playlist_url:
+        # Signed URLs go through Streamlink, as they did before August 23.
+        # The custom relay remains for the API's unsigned child URL fallback.
+        if parsed_playlist.hostname == 'cdn-akamai-livebarn.akamaized.net' and not signed_url:
             logger.info("    Launching curl-cffi HLS relay")
             chunk_count = 0
             try:

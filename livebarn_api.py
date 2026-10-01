@@ -86,6 +86,17 @@ def first_playlist_url(master_url: str, playlist_text: str) -> str:
     raise LiveBarnError("LiveBarn returned an empty playback playlist")
 
 
+def playback_url(master_url: str, playlist_text: str) -> str:
+    """Use a signed Akamai master when available; otherwise use its child."""
+    if (
+        urlparse(master_url).hostname == "cdn-akamai-livebarn.akamaized.net"
+        and parse_qs(urlparse(master_url).query).get("hdnts")
+        and "#EXT-X-STREAM-INF:" in playlist_text
+    ):
+        return master_url
+    return first_playlist_url(master_url, playlist_text)
+
+
 class LiveBarnClient:
     """Authenticate once, cache the DPoP-bound token, and call playback APIs."""
 
@@ -361,7 +372,7 @@ class LiveBarnClient:
         credentials: dict[str, str],
         pin: str | None = None,
     ) -> str:
-        """Return a header-free child HLS playlist URL for a live surface."""
+        """Prefer the signed top-level HLS URL used by the original player path."""
         await self.authenticate(credentials)
         params: dict[str, object] = {"feedModeId": feed_mode_id}
         if pin:
@@ -398,4 +409,7 @@ class LiveBarnClient:
             raise LiveBarnError(
                 f"LiveBarn playlist request failed ({master_response.status_code})"
             )
-        return first_playlist_url(str(master_response.url), master_response.text)
+        master_url = str(master_response.url)
+        # The pre-August player captured the signed master and used Streamlink.
+        # Never invent a child's signature by copying parent query fields.
+        return playback_url(master_url, master_response.text)

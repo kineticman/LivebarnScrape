@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
-from livebarn_api import LiveBarnClient, create_dpop_proof, first_playlist_url
+from livebarn_api import LiveBarnClient, create_dpop_proof, first_playlist_url, playback_url
 
 
 def decode_segment(value: str) -> bytes:
@@ -68,6 +68,19 @@ class LiveBarnApiTests(unittest.TestCase):
             "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nvideo/chunklist.m3u8\n",
         )
         self.assertEqual(result, "https://cdn.example/video/chunklist.m3u8")
+
+    def test_signed_akamai_master_is_preserved(self):
+        master = "https://cdn-akamai-livebarn.akamaized.net/live/master.m3u8?hdnts=secret"
+        playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nchunklist.m3u8\n"
+        self.assertEqual(playback_url(master, playlist), master)
+
+    def test_unsigned_master_still_resolves_child(self):
+        master = "https://cdn-akamai-livebarn.akamaized.net/live/master.m3u8"
+        playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nchunklist.m3u8?exp=123\n"
+        self.assertEqual(
+            playback_url(master, playlist),
+            "https://cdn-akamai-livebarn.akamaized.net/live/chunklist.m3u8?exp=123",
+        )
 
 
 if __name__ == "__main__":
