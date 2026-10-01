@@ -367,6 +367,7 @@ HTML_TEMPLATE = r"""
 <head>
     <meta charset="UTF-8">
     <title>LiveBarn Favorites Manager</title>
+    <link rel="icon" type="image/png" sizes="256x256" href="/static/livebarn-favicon.png?v={{ app_version }}">
     <style>
         body {
             font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

@@ -25,6 +25,13 @@ FAVORITE = {
 
 
 class ChannelLogoTests(unittest.TestCase):
+    def test_html_template_references_square_favicon(self):
+        self.assertIn(
+            'rel="icon" type="image/png" sizes="256x256" '
+            'href="/static/livebarn-favicon.png?v={{ app_version }}"',
+            livebarn_manager.HTML_TEMPLATE,
+        )
+
     def test_logo_url_uses_github_pages(self):
         self.assertEqual(
             livebarn_manager.get_default_channel_logo_url(),
