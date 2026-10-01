@@ -11,9 +11,9 @@ A Docker-based application that creates a unified streaming interface for LiveBa
   - Lou & Gib Reese Ice Arena (LGRIA)
 - 🔄 **Auto-Refresh**: Daily schedule updates at 3:00 AM
 - 🌐 **Web UI**: Manage favorites and view streams through a clean web interface
-- 🔗 **HLS Relay**: Direct `curl-cffi` streaming with Streamlink fallback
+- 🔗 **Stream Proxy**: Streamlink playback of LiveBarn's signed HLS streams, with a `curl-cffi` relay fallback
 
-## Screenshots
+## Web Interface
 
 The web interface allows you to:
 - Browse all available LiveBarn venues
@@ -106,8 +106,11 @@ docker run -d \
   -e LAN_IP=192.168.1.100 \
   -e PUBLIC_PORT=5000 \
   --restart unless-stopped \
-  ghcr.io/kineticman/livebarn-manager:latest
+  ghcr.io/kineticman/livebarnscrape:latest
 ```
+
+`latest` tracks the `main` branch. To pin a release, use its version tag instead,
+for example `ghcr.io/kineticman/livebarnscrape:v2.4.3`.
 
 If you want to expose the app on a different host port (e.g. 8653):
 
@@ -121,7 +124,7 @@ docker run -d \
   -e LAN_IP=192.168.1.100 \
   -e PUBLIC_PORT=8653 \
   --restart unless-stopped \
-  ghcr.io/kineticman/livebarn-manager:latest
+  ghcr.io/kineticman/livebarnscrape:latest
 ```
 
 ## Initial Setup
@@ -195,7 +198,7 @@ The system uses a **modular provider architecture** to automatically fetch sched
 - **Real Events**: Shows actual scheduled events (games, practices, public skate)
 - **Gap Filling**: Fills unscheduled time with "Open Ice" placeholders
 - **Auto-Refresh**: Schedules update daily at 3:00 AM
-- **Time Range**: Covers today and next 2 days
+- **Time Range**: Covers the next 7 days
 - **Modular System**: Easy to add new rinks without modifying core code
 
 ### Adding More Rinks
@@ -263,10 +266,13 @@ See existing providers in `schedule_providers/` for complete examples.
 | `PUBLIC_PORT` | auto | Public/external port used in generated URLs (defaults to `SERVER_PORT`) |
 | `LOG_LEVEL` | INFO | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `DB_PATH` | /data/livebarn.db | SQLite database path |
+| `TZ` | America/New_York (in `docker-compose.yml`) | Container timezone used for schedules and the 3:00 AM refresh |
 
 Credentials can also be saved from the **LiveBarn Sign-in** card on the web admin page. A saved admin override takes precedence over environment variables and persists in the SQLite database. Select **Use .env** to delete the saved override and return to `LIVEBARN_EMAIL`/`LIVEBARN_PASSWORD`. The UI never returns the saved password. Set `ADMIN_PASSWORD` to protect the admin UI, venue/favorite actions, and `/api/*` routes with HTTP Basic authentication. Playlist, XMLTV, health, and stream-proxy routes remain open for DVR clients.
 
 Stream refreshes use LiveBarn's playback API through `curl-cffi`. The first sign-in uses a short browser-assisted Auth0 step because LiveBarn protects it with AWS WAF; its DPoP-bound access token is then cached in `/data/livebarn.db` for roughly 12 hours. Legacy accounts may first need to sign in successfully at `https://watch.livebarn.com` in a normal browser and complete any migration or CAPTCHA prompts shown there.
+
+Playback goes through `/proxy/<surface_id>`. When LiveBarn returns a signed Akamai master playlist, the proxy plays it with Streamlink. If only an unsigned child playlist is available, the proxy uses the built-in `curl-cffi` relay instead.
 
 ### Port Mapping
 
@@ -281,6 +287,8 @@ Stream refreshes use LiveBarn's playback API through `curl-cffi`. The first sign
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Admin web interface |
+| `/venue/<id>` | GET | Surfaces for one venue |
+| `/toggle_favorite` | POST | Legacy form-based favorite toggle |
 | `/api/favorites` | GET | List favorite surfaces |
 | `/api/favorites/<id>` | POST | Toggle a favorite surface |
 | `/api/favorites/<id>/mode` | POST | Set the preferred camera mode |
@@ -376,11 +384,15 @@ LivebarnScrape/
 ├── livebarn_api.py               # OAuth and playback API client
 ├── hls_relay.py                  # curl-cffi HLS-to-MPEG-TS relay
 ├── credential_store.py           # SQLite-backed credential settings
+├── static/                       # Channel logo and favicon
 ├── tests/                        # Unit tests
 ├── docs/                         # User and provider guides
 ├── Dockerfile                    # Container image definition
 ├── docker-compose.yml            # Docker Compose configuration
 ├── entrypoint.sh                 # Container startup script
+├── livebarn.service              # Example systemd unit
+├── .env.example                  # Template for local configuration
+├── VERSION                       # Application version
 ├── requirements.txt              # Python dependencies
 ├── README.md                     # This file
 └── AGENTS.md                     # Contributor guidance
@@ -391,6 +403,7 @@ LivebarnScrape/
 1. **Install Python dependencies:**
    ```bash
    pip install -r requirements.txt
+   playwright install chromium
    ```
 
 2. **Set environment variables:**
@@ -418,6 +431,13 @@ LivebarnScrape/
    events = lgria_provider.fetch_schedule(datetime.now(), datetime.now() + timedelta(days=2))
    print(f'Found {len(events)} events')
    "
+   ```
+
+6. **Run the checks:**
+   ```bash
+   python -m compileall -q .
+   python -m unittest discover -s tests -v
+   docker compose config
    ```
 
 ### Building Docker Image
